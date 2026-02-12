@@ -55,4 +55,4 @@ RUN mkdir -p chroma_db
 
 # Run the application
 # Run on port 8000 hardcoded to match Railway's load balancer setting
-CMD sh -c "uvicorn api.main:app --host 0.0.0.0 --port 8000"
+CMD sh -c "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"
