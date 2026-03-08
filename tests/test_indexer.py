@@ -15,16 +15,14 @@ class TestHybridIndexer:
         """Test that indexer initializes correctly"""
         indexer = HybridIndexer()
         assert indexer is not None
-        assert indexer.embedder is not None
-        assert indexer.reranker is not None
-    
-    def test_get_embedding(self):
-        """Test embedding generation"""
+        assert indexer.page_index is not None
+
+    def test_search_empty_index(self):
+        """Test search on empty index returns None"""
         indexer = HybridIndexer()
-        embedding = indexer.get_embedding("test text")
-        assert isinstance(embedding, list)
-        assert len(embedding) > 0
-        assert all(isinstance(x, (float, int)) for x in embedding)
+        result = indexer.search("test query")
+        # Empty index should return None
+        assert result is None
 
 
 class TestMetricsTracker:

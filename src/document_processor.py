@@ -20,8 +20,8 @@ class DocumentProcessor:
     LARGE_FILE_THRESHOLD = 50 * 1024 * 1024  # 50MB in bytes
     
     # Maximum chunk size for text splitting
-    CHUNK_SIZE = 1000  # characters
-    CHUNK_OVERLAP = 200  # characters
+    CHUNK_SIZE = 2000  # characters (Increased to reduce API calls)
+    CHUNK_OVERLAP = 400  # characters
     
     @staticmethod
     def detect_file_type(filename: str) -> str:

@@ -1,423 +1,510 @@
-import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
-import {
-  Box,
-  AppBar,
-  Toolbar,
-  Typography,
-  Paper,
-  Snackbar,
-  Alert,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
-import { ThemeProvider, createTheme } from '@mui/material/styles';
-import CssBaseline from '@mui/material/CssBaseline';
-import MenuIcon from '@mui/icons-material/Menu';
-import AutoAwesomeIcon from '@mui/icons-material/AutoAwesome';
-import Brightness4Icon from '@mui/icons-material/Brightness4';
-import Brightness7Icon from '@mui/icons-material/Brightness7';
-import FileUpload from './components/FileUpload';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import type { ChangeEvent } from 'react';
+import { MessageSquare, FolderOpen, Send, Paperclip, Sun, Moon, Plus, AlertCircle } from 'lucide-react';
+import Sidebar from './components/Sidebar';
+import WelcomeView from './components/WelcomeView';
 import ChatInterface from './components/ChatInterface';
-import DocumentList from './components/DocumentList';
-import ConversationSidebar from './components/ConversationSidebar';
+import KnowledgeBase from './components/KnowledgeBase';
+import { useResponsive } from './hooks/useResponsive';
+import { v4 as uuidv4 } from 'uuid';
 import {
   uploadDocument,
-  sendMessage,
+  sendMessage as sendChatMessage,
   getDocuments,
   getConversations,
-  getConversationHistory,
   createConversation,
-  deleteConversation,
-  type Message,
-  type Document,
-  type Conversation,
+  deleteConversation as apiDeleteConversation,
+  getConversationHistory,
 } from './services/api';
-import { v4 as uuidv4 } from 'uuid';
 
-// Persist session ID in localStorage
-const getSessionId = (): string => {
-  const stored = localStorage.getItem('rag_session_id');
-  if (stored) return stored;
-  const newId = uuidv4();
-  localStorage.setItem('rag_session_id', newId);
-  return newId;
-};
+/* ── Session Management ────────────────────────────── */
+function getSessionId(): string {
+  let sid = localStorage.getItem('session_id');
+  if (!sid) {
+    sid = uuidv4();
+    localStorage.setItem('session_id', sid);
+  }
+  return sid;
+}
 
-// Persist theme preference
-const getInitialTheme = (): 'dark' | 'light' => {
-  const stored = localStorage.getItem('rag_theme_mode');
-  return (stored as 'dark' | 'light') || 'dark';
-};
-
-function App() {
-  const [mode, setMode] = useState<'dark' | 'light'>(getInitialTheme);
-  const [sessionId] = useState(getSessionId);
-  const [conversationId, setConversationId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Message[]>([]);
-  const [documents, setDocuments] = useState<Document[]>([]);
-  const [conversations, setConversations] = useState<Conversation[]>([]);
-  const [uploading, setUploading] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [snackbar, setSnackbar] = useState<{
-    open: boolean;
-    message: string;
-    severity: 'success' | 'error' | 'info';
-  }>({
-    open: false,
-    message: '',
-    severity: 'info',
+/* ── Drag-to-Resize Hook ─────────────────────────── */
+function usePanelResize(
+  initialWidth: number,
+  minWidth: number,
+  maxWidth: number,
+  storageKey: string,
+  direction: 'left' | 'right' = 'left',
+) {
+  const [width, setWidth] = useState<number>(() => {
+    const saved = localStorage.getItem(storageKey);
+    return saved ? Math.max(minWidth, Math.min(maxWidth, Number(saved))) : initialWidth;
   });
+  const dragging = useRef(false);
+  const startX = useRef(0);
+  const startW = useRef(0);
 
-  // Track initialization to prevent double calls (React 18 Strict Mode)
-  const initialized = useRef(false);
+  const onMouseDown = useCallback((e: React.MouseEvent) => {
+    e.preventDefault();
+    dragging.current = true;
+    startX.current = e.clientX;
+    startW.current = width;
+    document.body.style.cursor = 'col-resize';
+    document.body.style.userSelect = 'none';
 
-  // Toggle color mode
-  const colorMode = useMemo(
-    () => ({
-      toggleColorMode: () => {
-        setMode((prevMode) => {
-          const newMode = prevMode === 'light' ? 'dark' : 'light';
-          localStorage.setItem('rag_theme_mode', newMode);
-          return newMode;
-        });
-      },
-    }),
-    [],
-  );
+    const onMove = (ev: MouseEvent) => {
+      if (!dragging.current) return;
+      const delta = ev.clientX - startX.current;
+      const newW = direction === 'left'
+        ? Math.max(minWidth, Math.min(maxWidth, startW.current + delta))
+        : Math.max(minWidth, Math.min(maxWidth, startW.current - delta));
+      setWidth(newW);
+    };
 
-  // Dynamic theme creation
-  const theme = useMemo(
-    () =>
-      createTheme({
-        palette: {
-          mode,
-          primary: {
-            main: mode === 'dark' ? '#667eea' : '#4f46e5',
-            light: '#8fa4f0',
-            dark: '#4a5fc7',
-          },
-          secondary: {
-            main: '#f093fb',
-          },
-          background: {
-            default: mode === 'dark' ? '#0f0f23' : '#f3f4f6',
-            paper: mode === 'dark' ? '#1a1a2e' : '#ffffff',
-          },
-          text: {
-            primary: mode === 'dark' ? '#e8e8f0' : '#1f2937',
-            secondary: mode === 'dark' ? '#a0a0b8' : '#6b7280',
-          },
-        },
-        typography: {
-          fontFamily: '"Inter", "Roboto", "Helvetica", "Arial", sans-serif',
-        },
-        shape: {
-          borderRadius: 12,
-        },
-        components: {
-          MuiPaper: {
-            styleOverrides: {
-              root: {
-                backgroundImage: 'none',
-              },
-            },
-          },
-        },
-      }),
-    [mode],
-  );
+    const onUp = () => {
+      dragging.current = false;
+      document.body.style.cursor = '';
+      document.body.style.userSelect = '';
+      document.removeEventListener('mousemove', onMove);
+      document.removeEventListener('mouseup', onUp);
+      setWidth((w) => { localStorage.setItem(storageKey, String(w)); return w; });
+    };
 
-  const loadDocuments = useCallback(async () => {
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [width, minWidth, maxWidth, storageKey, direction]);
+
+  return { width, onMouseDown };
+}
+
+/* ── App ──────────────────────────────────────────── */
+function App() {
+  const { isMobile, isTablet, isDesktop } = useResponsive();
+  const [theme, setTheme] = useState(() => localStorage.getItem('theme') || 'dark');
+  const [mobilePanel, setMobilePanel] = useState<'chat' | 'files'>('chat');
+  const [messages, setMessages] = useState<any[]>([]);
+  const [documents, setDocuments] = useState<any[]>([]);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [conversationId, setConversationId] = useState<string | null>(null);
+  const [conversations, setConversations] = useState<any[]>([]);
+  const [tabletFilesOpen, setTabletFilesOpen] = useState(false);
+  const [sidebarExpanded, setSidebarExpanded] = useState(() => localStorage.getItem('sidebar_expanded') !== 'false');
+  const [sidebarWidth, setSidebarWidth] = useState(() => {
+    const saved = localStorage.getItem('sidebar_expanded');
+    return saved === 'false' ? 60 : 220;
+  });
+  const [error, setError] = useState<string | null>(null);
+  const [sessionId] = useState(getSessionId);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Resizable panels
+  const kbPanel = usePanelResize(380, 280, 550, 'kb_w', 'right');
+
+  const toggleSidebar = () => {
+    setSidebarExpanded((prev) => {
+      const next = !prev;
+      localStorage.setItem('sidebar_expanded', String(next));
+      const newWidth = next ? 220 : 60;
+      setSidebarWidth(newWidth);
+      return next;
+    });
+  };
+
+  useEffect(() => {
+    document.documentElement.className = theme;
+    localStorage.setItem('theme', theme);
+  }, [theme]);
+
+  const toggleTheme = () => setTheme((t) => (t === 'dark' ? 'light' : 'dark'));
+
+  // ── Load data from backend on mount ──
+  useEffect(() => {
+    loadConversations();
+    loadDocuments();
+  }, [sessionId]);
+
+  const loadConversations = async () => {
+    try {
+      const convs = await getConversations(sessionId);
+      setConversations(convs.map((c: any) => ({ id: c.id, title: c.title })));
+    } catch (e) {
+      console.warn('Could not load conversations (backend may be offline):', e);
+      // Keep empty — this is fine for first use
+    }
+  };
+
+  const loadDocuments = async () => {
     try {
       const docs = await getDocuments(sessionId);
       setDocuments(docs);
-    } catch (error) {
-      console.error('Failed to load documents:', error);
+    } catch (e) {
+      console.warn('Could not load documents (backend may be offline):', e);
     }
-  }, [sessionId]);
+  };
 
-  const loadConversations = useCallback(async () => {
-    try {
-      const convs = await getConversations(sessionId);
-      setConversations(convs);
-    } catch (error) {
-      console.error('Failed to load conversations:', error);
-    }
-  }, [sessionId]);
+  const showWelcome = messages.length === 0;
 
-  // Initialize on mount - fix double init
-  useEffect(() => {
-    if (initialized.current) return;
-    initialized.current = true;
+  // ── Send message to real backend ──
+  const handleSendMessage = async (msg: string) => {
+    setError(null);
 
-    const init = async () => {
-      try {
-        await loadDocuments();
-        await loadConversations();
-
-        // Check if we should create a new conversation or load existing
-        const convs = await getConversations(sessionId);
-        if (convs.length > 0) {
-          // Load most recent conversation
-          const lastConv = convs[0]; // Assuming backend returns sorted by updated_at desc
-          setConversationId(lastConv.id);
-          const msgs = await getConversationHistory(lastConv.id);
-          setMessages(msgs);
-        } else {
-          // Only create new if none exist
-          const conv = await createConversation(sessionId);
-          setConversationId(conv.id);
-        }
-      } catch (error) {
-        console.error('Failed to initialize:', error);
-      }
+    // Optimistic UI: show user message immediately
+    const userMsg = {
+      id: uuidv4(),
+      role: 'user',
+      content: msg,
+      created_at: new Date().toISOString(),
     };
-    init();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+    setMessages((p) => [...p, userMsg]);
+    setIsProcessing(true);
 
+    try {
+      // Create conversation if needed
+      let cid = conversationId;
+      if (!cid) {
+        const conv = await createConversation(sessionId);
+        cid = conv.id;
+        setConversationId(cid);
+        setConversations((prev) => [{ id: cid, title: msg.slice(0, 50) }, ...prev]);
+      }
+
+      // Send to backend
+      const response = await sendChatMessage(msg, cid, sessionId);
+
+      // Add assistant response
+      setMessages((p) => [...p, {
+        ...response.message,
+        sources: response.sources,
+        chart_data: response.chart_data,
+      }]);
+    } catch (e: any) {
+      console.error('Chat error:', e);
+      const errorMsg = e?.response?.data?.detail || e?.message || 'Failed to get response';
+      setError(errorMsg);
+
+      // Add fallback error message
+      setMessages((p) => [...p, {
+        id: uuidv4(),
+        role: 'assistant',
+        content: `⚠️ ${errorMsg}\n\nPlease check that the backend server is running.`,
+        created_at: new Date().toISOString(),
+        confidence: 0,
+      }]);
+    } finally {
+      setIsProcessing(false);
+    }
+  };
+
+  // ── Select conversation & load messages ──
+  const handleSelectConversation = async (id: string) => {
+    setConversationId(id);
+    try {
+      const msgs = await getConversationHistory(id);
+      setMessages(msgs);
+    } catch (e) {
+      console.error('Failed to load conversation:', e);
+      setMessages([]);
+    }
+  };
+
+  const handleNewChat = () => {
+    setConversationId(null);
+    setMessages([]);
+    setError(null);
+  };
+
+  // ── File upload to real backend ──
   const handleFileUpload = async (file: File) => {
     setUploading(true);
+    setError(null);
     try {
-      await uploadDocument(file, sessionId);
-      showSnackbar(`${file.name} uploaded successfully!`, 'success');
-      setTimeout(loadDocuments, 1500);
-    } catch (error: any) {
-      console.error('Upload failed:', error);
-      showSnackbar(
-        error.response?.data?.detail || 'Upload failed',
-        'error'
-      );
+      const result: any = await uploadDocument(file, sessionId);
+      const docId = result.document_id || result.id;
+      // Add to local documents list
+      setDocuments((p) => [{
+        id: docId,
+        filename: result.filename,
+        original_filename: result.filename,
+        file_size: file.size,
+        file_type: file.name.split('.').pop() || '?',
+        status: result.status || 'processing',
+        created_at: new Date().toISOString(),
+      }, ...p]);
+
+      // Poll for status update
+      pollDocumentStatus(docId);
+    } catch (e: any) {
+      console.error('Upload error:', e);
+      setError(e?.response?.data?.detail || 'Upload failed. Is the backend running?');
     } finally {
       setUploading(false);
     }
   };
 
-  const handleSendMessage = async (messageText: string) => {
-    if (!conversationId) {
-      showSnackbar('Chat not initialized', 'error');
-      return;
-    }
+  // ── Poll document processing status ──
+  const pollDocumentStatus = (docId: string) => {
+    let attempts = 0;
+    const maxAttempts = 30; // 30 * 2s = 60s max
 
-    const userMessage: Message = {
-      id: uuidv4(),
-      role: 'user',
-      content: messageText,
-      created_at: new Date().toISOString(),
-    };
-    setMessages((prev) => [...prev, userMessage]);
-    setLoading(true);
-
-    try {
-      const response = await sendMessage(messageText, conversationId, sessionId);
-      const assistantMsg: Message = {
-        ...response.message,
-        sources: response.sources || response.message.sources || [],
-        chart_data: response.chart_data || response.message.chart_data,
-      };
-      setMessages((prev) => [...prev, assistantMsg]);
-      // Reload conversations to update "time ago"
-      loadConversations();
-    } catch (error: any) {
-      console.error('Failed to send message:', error);
-      const errorMsg: Message = {
-        id: uuidv4(),
-        role: 'assistant',
-        content: error.response?.data?.detail || 'Failed to get response. Is the backend running?',
-        created_at: new Date().toISOString(),
-      };
-      setMessages((prev) => [...prev, errorMsg]);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const handleSelectConversation = async (convId: string) => {
-    if (convId === conversationId) return;
-    setConversationId(convId);
-    try {
-      const msgs = await getConversationHistory(convId);
-      setMessages(msgs);
-    } catch (error) {
-      console.error('Failed to load messages:', error);
-      setMessages([]);
-    }
-  };
-
-  const handleNewConversation = async () => {
-    try {
-      const conv = await createConversation(sessionId);
-      setConversationId(conv.id);
-      setMessages([]);
-      await loadConversations();
-      showSnackbar('New conversation started', 'info');
-    } catch (error) {
-      console.error('Failed to create conversation:', error);
-    }
-  };
-
-  const handleDeleteConversation = async (convId: string) => {
-    try {
-      await deleteConversation(convId);
-      if (convId === conversationId) {
-        // If deleting current, switch to another or create new
-        const remaining = conversations.filter(c => c.id !== convId);
-        if (remaining.length > 0) {
-          handleSelectConversation(remaining[0].id);
-        } else {
-          handleNewConversation();
-        }
+    const interval = setInterval(async () => {
+      attempts++;
+      if (attempts >= maxAttempts) {
+        clearInterval(interval);
+        return;
       }
-      await loadConversations();
-      showSnackbar('Conversation deleted', 'info');
-    } catch (error) {
-      console.error('Failed to delete conversation:', error);
+
+      try {
+        const docs = await getDocuments(sessionId);
+        const doc = docs.find((d: any) => d.id === docId);
+        if (doc && doc.status !== 'processing') {
+          setDocuments((prev) =>
+            prev.map((d) => d.id === docId ? { ...d, status: doc.status, metadata: doc.metadata } : d)
+          );
+          clearInterval(interval);
+        }
+      } catch {
+        // Silently retry
+      }
+    }, 2000);
+  };
+
+  // ── Delete conversation ──
+  const handleDeleteConversation = async (id: string) => {
+    try {
+      await apiDeleteConversation(id);
+      setConversations((prev) => prev.filter((c) => c.id !== id));
+      if (conversationId === id) {
+        handleNewChat();
+      }
+    } catch (e) {
+      console.error('Failed to delete conversation:', e);
     }
   };
 
-  const handleDocumentDeleted = (id: string) => {
-    showSnackbar('Document deleted successfully', 'success');
-    loadDocuments();
-    // Optionally reload chat if needed, but not strictly required
+  const showFilesPanel = () => {
+    if (isMobile) setMobilePanel('files');
+    else if (isTablet) setTabletFilesOpen(true);
+    else {
+      // Desktop: trigger file input directly
+      fileInputRef.current?.click();
+    }
   };
 
-  const showSnackbar = (
-    message: string,
-    severity: 'success' | 'error' | 'info'
-  ) => {
-    setSnackbar({ open: true, message, severity });
+  const handleFileInputChange = (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (file) {
+      handleFileUpload(file);
+      e.target.value = ''; // Reset so same file can be re-uploaded
+    }
   };
 
+  const renderChatPanel = () => {
+    if (showWelcome) {
+      return (
+        <div className="flex flex-col h-full">
+          <WelcomeView onSendMessage={handleSendMessage} />
+          <div className="shrink-0 w-full flex justify-center" style={{ padding: '8px 24px 24px 24px' }}>
+            <div className="w-full" style={{ maxWidth: '520px' }}>
+              <ChatInput onSend={handleSendMessage} isProcessing={isProcessing} onFileUpload={showFilesPanel} />
+            </div>
+          </div>
+        </div>
+      );
+    }
+    return (
+      <ChatInterface messages={messages} onSendMessage={handleSendMessage} isProcessing={isProcessing} onFileUpload={showFilesPanel} />
+    );
+  };
+
+  /* ── Error Banner ──────────────────────────────────── */
+  const errorBanner = error ? (
+    <div className="flex items-center gap-2 px-4 py-2 text-sm" style={{ backgroundColor: 'rgba(239,68,68,0.1)', color: 'var(--color-danger)', borderBottom: '1px solid var(--color-edge)' }}>
+      <AlertCircle size={14} />
+      <span>{error}</span>
+      <button onClick={() => setError(null)} className="ml-auto text-xs opacity-60 hover:opacity-100">✕</button>
+    </div>
+  ) : null;
+
+  /* ── MOBILE ──────────────────────────────────────── */
+  if (isMobile) {
+    return (
+      <div className="h-screen w-screen flex flex-col overflow-hidden" style={{ backgroundColor: 'var(--color-surface)' }}>
+        {errorBanner}
+        <div className="flex-1 overflow-hidden" style={{ paddingBottom: '56px' }}>
+          {mobilePanel === 'chat' ? renderChatPanel() : (
+            <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={(id) => setDocuments((p) => p.filter((d) => d.id !== id))} />
+          )}
+        </div>
+        <div className="fixed bottom-0 left-0 right-0 flex items-stretch z-40" style={{ backgroundColor: 'var(--color-sidebar)', borderTop: '1px solid var(--color-edge)', height: '56px' }}>
+          <NavBtn icon={<Plus size={18} />} label="New" onClick={handleNewChat} active={false} isLogo />
+          <NavBtn icon={<MessageSquare size={18} />} label="Chat" onClick={() => setMobilePanel('chat')} active={mobilePanel === 'chat'} />
+          <NavBtn icon={<FolderOpen size={18} />} label="Files" onClick={() => setMobilePanel('files')} active={mobilePanel === 'files'} />
+          <NavBtn icon={theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} label={theme === 'dark' ? 'Light' : 'Dark'} onClick={toggleTheme} active={false} />
+        </div>
+      </div>
+    );
+  }
+
+  /* ── TABLET ──────────────────────────────────────── */
+  if (isTablet) {
+    return (
+      <div className="h-screen w-screen flex overflow-hidden" style={{ backgroundColor: 'var(--color-surface)' }}>
+        <Sidebar activeTab={showWelcome ? 'home' : 'chat'} setActiveTab={() => { }} theme={theme} toggleTheme={toggleTheme} conversations={conversations} onNewChat={handleNewChat} onSelectConversation={handleSelectConversation} currentConversationId={conversationId} expanded={sidebarExpanded} onToggleExpand={toggleSidebar} />
+        <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+          {errorBanner}
+          {renderChatPanel()}
+        </div>
+        {tabletFilesOpen && (
+          <>
+            <div className="fixed inset-0 z-30" style={{ backgroundColor: 'rgba(0,0,0,0.4)' }} onClick={() => setTabletFilesOpen(false)} />
+            <div className="fixed top-0 right-0 h-full z-40 flex flex-col anim-fade" style={{ width: '360px', backgroundColor: 'var(--color-surface)', borderLeft: '1px solid var(--color-edge)' }}>
+              <div className="flex items-center justify-between px-5 py-3" style={{ borderBottom: '1px solid var(--color-edge)' }}>
+                <span className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>Knowledge Base</span>
+                <button onClick={() => setTabletFilesOpen(false)} className="p-1.5 rounded-lg" style={{ color: 'var(--color-muted)' }}>✕</button>
+              </div>
+              <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={(id) => setDocuments((p) => p.filter((d) => d.id !== id))} />
+            </div>
+          </>
+        )}
+      </div>
+    );
+  }
+
+  /* ── DESKTOP — with drag-to-resize handles ──────── */
   return (
-    <ThemeProvider theme={theme}>
-      <CssBaseline />
-      <Box sx={{ display: 'flex', flexDirection: 'column', height: '100vh', overflow: 'hidden' }}>
-        {/* Header */}
-        <AppBar
-          position="static"
-          elevation={0}
-          sx={{
-            bgcolor: 'background.paper',
-            borderBottom: '1px solid',
-            borderColor: 'divider',
-            color: 'text.primary',
-          }}
-        >
-          <Toolbar>
-            <Tooltip title="Conversations">
-              <IconButton
-                color="inherit"
-                onClick={() => {
-                  setSidebarOpen(!sidebarOpen);
-                  if (!sidebarOpen) loadConversations();
-                }}
-                sx={{ mr: 2 }}
-              >
-                <MenuIcon />
-              </IconButton>
-            </Tooltip>
-            <AutoAwesomeIcon sx={{ mr: 1.5, color: 'primary.main' }} />
-            <Typography
-              variant="h6"
-              component="div"
-              sx={{
-                flexGrow: 1,
-                fontWeight: 700,
-                background: mode === 'dark'
-                  ? 'linear-gradient(135deg, #667eea 0%, #f093fb 100%)'
-                  : 'linear-gradient(135deg, #4f46e5 0%, #7c3aed 100%)',
-                WebkitBackgroundClip: 'text',
-                WebkitTextFillColor: 'transparent',
-              }}
-            >
-              DocuChat AI
-            </Typography>
-
-            <Tooltip title={mode === 'dark' ? "Switch to Light Mode" : "Switch to Dark Mode"}>
-              <IconButton onClick={colorMode.toggleColorMode} color="inherit">
-                {mode === 'dark' ? <Brightness7Icon /> : <Brightness4Icon />}
-              </IconButton>
-            </Tooltip>
-          </Toolbar>
-        </AppBar>
-
-        {/* Conversation Sidebar */}
-        <ConversationSidebar
-          open={sidebarOpen}
+    <div className="h-screen w-screen flex overflow-hidden" style={{ backgroundColor: 'var(--color-surface)' }}>
+      {/* Hidden file input for upload */}
+      <input ref={fileInputRef} type="file" className="hidden" onChange={handleFileInputChange} accept=".pdf,.docx,.xlsx,.csv,.txt,.md" />
+      {/* Left Sidebar */}
+      <div className="shrink-0 h-full relative transition-all duration-200" style={{ width: `${sidebarWidth}px`, borderRight: '1px solid var(--color-edge)' }}>
+        <Sidebar
+          activeTab={showWelcome ? 'home' : 'chat'}
+          setActiveTab={() => { }}
+          theme={theme}
+          toggleTheme={toggleTheme}
           conversations={conversations}
-          currentConversationId={conversationId}
+          onNewChat={handleNewChat}
           onSelectConversation={handleSelectConversation}
-          onNewConversation={handleNewConversation}
-          onDeleteConversation={handleDeleteConversation}
+          currentConversationId={conversationId}
+          expanded={sidebarExpanded}
+          onToggleExpand={toggleSidebar}
         />
 
-        {/* Main Content */}
-        <Box
-          sx={{
-            flex: 1,
-            display: 'flex',
-            overflow: 'hidden',
-            ml: sidebarOpen ? '280px' : 0,
-            transition: 'margin-left 0.3s ease',
+      </div>
+
+      {/* Chat Panel — fills remaining space */}
+      <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
+        {errorBanner}
+        {renderChatPanel()}
+      </div>
+
+      {/* Knowledge Base — resizable */}
+      <div className="shrink-0 h-full relative" style={{ width: `${kbPanel.width}px`, borderLeft: '1px solid var(--color-edge)' }}>
+        <DragHandle side="left" onMouseDown={kbPanel.onMouseDown} />
+        <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={(id) => setDocuments((p) => p.filter((d) => d.id !== id))} />
+      </div>
+    </div>
+  );
+}
+
+/* ── Drag Handle ─────────────────────────────────── */
+function DragHandle({ side, onMouseDown }: { side: 'left' | 'right'; onMouseDown: (e: React.MouseEvent) => void }) {
+  return (
+    <div
+      onMouseDown={onMouseDown}
+      className="drag-handle-zone"
+      style={{
+        position: 'absolute',
+        top: 0,
+        bottom: 0,
+        width: '8px',
+        [side === 'right' ? 'right' : 'left']: '-4px',
+        cursor: 'col-resize',
+        zIndex: 20,
+        display: 'flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+      }}
+    >
+      <div
+        className="drag-handle-line"
+        style={{
+          width: '2px',
+          height: '100%',
+          borderRadius: '1px',
+          backgroundColor: 'var(--color-edge)',
+          transition: 'background-color 0.2s ease, width 0.2s ease',
+        }}
+        onMouseEnter={(e) => {
+          const el = e.currentTarget as HTMLElement;
+          el.style.backgroundColor = 'var(--color-accent)';
+          el.style.width = '3px';
+        }}
+        onMouseLeave={(e) => {
+          const el = e.currentTarget as HTMLElement;
+          el.style.backgroundColor = 'var(--color-edge)';
+          el.style.width = '2px';
+        }}
+      />
+    </div>
+  );
+}
+
+/* ── Sub-Components ───────────────────────────────── */
+function NavBtn({ icon, label, onClick, active, isLogo }: { icon: React.ReactNode; label: string; onClick: () => void; active: boolean; isLogo?: boolean }) {
+  return (
+    <button onClick={onClick} className="flex-1 flex flex-col items-center justify-center gap-0.5" style={{ color: active ? 'var(--color-accent)' : 'var(--color-muted)' }}>
+      {isLogo ? <div className="w-7 h-7 grad-copper rounded-lg flex items-center justify-center"><span className="text-white">{icon}</span></div> : icon}
+      <span className="text-[10px] leading-none">{label}</span>
+    </button>
+  );
+}
+
+function ChatInput({ onSend, isProcessing, onFileUpload }: { onSend: (m: string) => void; isProcessing: boolean; onFileUpload?: () => void }) {
+  const [input, setInput] = useState('');
+  const handleSend = () => { const t = input.trim(); if (!t || isProcessing) return; onSend(t); setInput(''); };
+
+  return (
+    <>
+      <div
+        className="flex items-center gap-2 rounded-xl"
+        style={{
+          backgroundColor: 'var(--color-card)',
+          border: '1px solid var(--color-edge)',
+          padding: '12px 16px',
+          minHeight: '56px',
+        }}
+      >
+        <input
+          type="text"
+          value={input}
+          onChange={(e) => setInput(e.target.value)}
+          onKeyDown={(e) => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
+          placeholder="Message DocuChat AI..."
+          disabled={isProcessing}
+          className="flex-1 min-w-0 bg-transparent outline-none disabled:opacity-50"
+          style={{ color: 'var(--color-primary)', fontSize: '15px', lineHeight: '1.5' }}
+        />
+        <button onClick={onFileUpload} className="p-2 rounded-lg shrink-0 active:scale-90 transition-transform" style={{ color: 'var(--color-muted)' }}>
+          <Paperclip size={20} />
+        </button>
+        <button
+          onClick={handleSend}
+          disabled={!input.trim() || isProcessing}
+          className="w-9 h-9 rounded-full flex items-center justify-center shrink-0 active:scale-90 transition-transform"
+          style={{
+            backgroundColor: input.trim() && !isProcessing ? 'var(--color-accent)' : 'var(--color-elevated)',
+            color: input.trim() && !isProcessing ? 'white' : 'var(--color-muted)',
+            cursor: input.trim() && !isProcessing ? 'pointer' : 'not-allowed',
           }}
         >
-          {/* Left Panel - Upload + Documents */}
-          <Box
-            sx={{
-              width: 320,
-              minWidth: 320,
-              display: 'flex',
-              flexDirection: 'column',
-              gap: 1,
-              p: 2,
-              borderRight: '1px solid',
-              borderColor: 'divider',
-            }}
-          >
-            <FileUpload onFileUpload={handleFileUpload} uploading={uploading} />
-            <Box sx={{ flex: 1, overflow: 'hidden' }}>
-              <DocumentList documents={documents} onDocumentDeleted={handleDocumentDeleted} />
-            </Box>
-          </Box>
-
-          {/* Main Chat Area */}
-          <Box sx={{ flex: 1, display: 'flex', overflow: 'hidden' }}>
-            <Paper
-              elevation={0}
-              sx={{
-                flex: 1,
-                display: 'flex',
-                bgcolor: 'transparent',
-              }}
-            >
-              <ChatInterface
-                messages={messages}
-                onSendMessage={handleSendMessage}
-                loading={loading}
-              />
-            </Paper>
-          </Box>
-        </Box>
-
-        {/* Snackbar */}
-        <Snackbar
-          open={snackbar.open}
-          autoHideDuration={4000}
-          onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-          anchorOrigin={{ vertical: 'bottom', horizontal: 'right' }}
-        >
-          <Alert
-            onClose={() => setSnackbar((prev) => ({ ...prev, open: false }))}
-            severity={snackbar.severity}
-            variant="filled"
-            sx={{ borderRadius: 2 }}
-          >
-            {snackbar.message}
-          </Alert>
-        </Snackbar>
-      </Box>
-    </ThemeProvider>
+          <Send size={16} />
+        </button>
+      </div>
+      <p className="text-[10px] text-center mt-2" style={{ color: 'var(--color-muted)' }}>
+        DocuChat AI can make mistakes. Verify important information.
+      </p>
+    </>
   );
 }
 

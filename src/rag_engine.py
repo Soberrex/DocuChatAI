@@ -1,9 +1,9 @@
 """
 Enhanced RAG Engine with Source Tracking
-Combines vector search with source citations
+Combines page index search with source citations
 """
 from typing import List, Dict, Optional
-from src.vector_db import get_vector_db
+from src.page_index import get_page_index
 from src.llm import get_llm_client
 
 
@@ -11,7 +11,7 @@ class RAGEngine:
     """RAG pipeline with context retrieval and source tracking"""
     
     def __init__(self):
-        self.vector_db = get_vector_db()
+        self.page_index = get_page_index()
         self.llm_client = get_llm_client()
     
     async def process_query(
@@ -19,24 +19,48 @@ class RAGEngine:
         query: str,
         session_id: str,
         conversation_history: Optional[List[Dict]] = None,
-        top_k: int = 5
+        top_k: int = 5,
+        has_documents: bool = False
     ) -> Dict:
         """Process user query through RAG pipeline"""
         
         # Step 1: Retrieve relevant context
-        context_chunks = self.vector_db.search(
+        context_chunks = self.page_index.search(
             query=query,
             n_results=top_k
         )
         
         if not context_chunks:
-            return {
-                'response': "I don't have any documents to answer from. Please upload some documents first.",
-                'sources': [],
-                'chart_data': None,
-                'confidence': 0.0,
-                'tokens_used': 0
-            }
+            if has_documents:
+                # Documents exist but no relevant chunks found for this query
+                # Return instant response without LLM call for speed
+                greeting_words = {'hi', 'hii', 'hello', 'hey', 'hola', 'greetings', 'sup', 'yo', 'howdy'}
+                query_lower = query.strip().rstrip('!?.').lower()
+                
+                if query_lower in greeting_words or len(query_lower) <= 3:
+                    return {
+                        'response': "Hey there! 👋 I have your documents loaded and ready to analyze. Ask me anything specific about the content — like summaries, key topics, definitions, or specific details!",
+                        'sources': [],
+                        'chart_data': None,
+                        'confidence': 0.8,
+                        'tokens_used': 0
+                    }
+                else:
+                    return {
+                        'response': f"I have your documents but couldn't find specific content matching \"{query[:50]}\". Try rephrasing or asking about specific topics, chapters, or terms from your uploaded documents.",
+                        'sources': [],
+                        'chart_data': None,
+                        'confidence': 0.2,
+                        'tokens_used': 0
+                    }
+            else:
+                return {
+                    'response': "I don't have any documents to answer from. Please upload some documents first.",
+                    'sources': [],
+                    'chart_data': None,
+                    'confidence': 0.0,
+                    'tokens_used': 0
+                }
         
         # Step 2: Generate response with LLM
         llm_response = self.llm_client.generate_chat_response(

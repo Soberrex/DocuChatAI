@@ -50,9 +50,9 @@ async def upload_document(
     session_id: Optional[str] = Form(None),
     db: DBSession = Depends(get_db)
 ):
-    """Upload and process document with text extraction, embedding, and auto-summary"""
+    """Upload and process document with text extraction, indexing, and auto-summary"""
     try:
-        from src.vector_db import get_vector_db
+        from src.page_index import get_page_index
         from src.rag_engine import get_rag_engine
 
         # Ensure session exists
@@ -89,54 +89,75 @@ async def upload_document(
         db.add(document)
         db.commit()
 
-        # Store chunks in vector database
-        vector_db = get_vector_db()
-        chunks_added = vector_db.add_document_chunks(
-            chunks=result['chunks'],
-            document_id=doc_id,
-            filename=file.filename,
-            file_type=result['file_type']
-        )
-
-        # Mark as ready immediately (summary generated in background)
-        document.status = 'ready'
-        document.indexed_at = datetime.utcnow()
-        db.commit()
-        vector_db.persist()
-
-        # Generate summary in background (non-blocking for faster upload response)
+        # Background Task: Indexing + Summary
         import asyncio
-        async def _generate_summary():
+        async def _process_upload_background():
             try:
+                print(f"🔄 Starting background processing for {file.filename}...")
                 from src.database import SessionLocal
-                rag_engine = get_rag_engine()
-                summary_result = await rag_engine.generate_document_summary(
+                from src.page_index import get_page_index
+                from src.rag_engine import get_rag_engine
+                
+                # 1. Indexing (Page Index)
+                page_index = get_page_index()
+                chunks_added = page_index.add_document_chunks(
+                    chunks=result['chunks'],
                     document_id=doc_id,
-                    document_text=result['text'][:10000],
+                    filename=file.filename,
                     file_type=result['file_type']
                 )
+                page_index.persist()
+                print(f"✅ Indexed {chunks_added} chunks for {file.filename}")
+
+                # 2. Summary Generation
                 bg_db = SessionLocal()
                 try:
                     doc = bg_db.query(DBDocument).filter(DBDocument.id == doc_id).first()
+                    if not doc:
+                        return
+
+                    doc.doc_metadata = {
+                        **(doc.doc_metadata or {}),
+                        'chunk_count': chunks_added
+                    }
+                    
+                    rag_engine = get_rag_engine()
+                    summary_result = await rag_engine.generate_document_summary(
+                        document_id=doc_id,
+                        document_text=result['text'][:10000],
+                        file_type=result['file_type']
+                    )
+                    
+                    doc.doc_metadata = {
+                        **(doc.doc_metadata or {}),
+                        'summary': summary_result.get('summary'),
+                        'suggested_charts': summary_result.get('suggested_charts', [])
+                    }
+                    doc.status = 'ready'
+                    doc.indexed_at = datetime.utcnow()
+                    bg_db.commit()
+                    print(f"✅ Background processing complete for {file.filename}")
+                    
+                except Exception as inner_e:
+                    print(f"❌ Error in background db update: {inner_e}")
                     if doc:
-                        doc.doc_metadata = {
-                            **(doc.doc_metadata or {}),
-                            'summary': summary_result.get('summary'),
-                            'suggested_charts': summary_result.get('suggested_charts', [])
-                        }
+                        doc.status = 'failed'
+                        doc.error_message = str(inner_e)
                         bg_db.commit()
                 finally:
                     bg_db.close()
+                    
             except Exception as e:
-                print(f"⚠️ Background summary failed (non-critical): {e}")
+                print(f"⚠️ Background processing failed completely: {e}")
 
-        asyncio.create_task(_generate_summary())
+        # Start background task
+        asyncio.create_task(_process_upload_background())
 
         return UploadResponse(
             document_id=doc_id,
             filename=file.filename,
-            status='ready',
-            message=f"Processed successfully. {chunks_added} chunks indexed.",
+            status='processing',
+            message=f"Upload accepted. Processing {len(result['chunks'])} chunks in background.",
             file_kept=result['should_keep_file'],
             summary=None
         )
@@ -179,13 +200,45 @@ async def chat(
             for msg in reversed(history_messages)
         ]
 
+        # UX IMPROVEMENT: Check if session has documents
+        doc_count = db.query(DBDocument).filter(
+            DBDocument.session_id == request.session_id
+        ).count()
+
+        if doc_count == 0:
+            assistant_msg_id = str(uuid.uuid4())
+            response_text = "I don't see any documents uploaded yet. Please upload a document so I can answer your questions."
+            
+            assistant_message = Message(
+                id=assistant_msg_id,
+                conversation_id=request.conversation_id,
+                role='assistant',
+                content=response_text,
+                created_at=datetime.utcnow(),
+                confidence=1.0
+            )
+            db.add(assistant_message)
+            db.commit()
+            
+            return ChatResponse(
+                message={
+                    "id": assistant_msg_id,
+                    "role": "assistant",
+                    "content": response_text,
+                    "created_at": assistant_message.created_at.isoformat(),
+                    "confidence": 1.0
+                },
+                sources=[]
+            )
+
         # Process query with RAG
         rag_engine = get_rag_engine()
         rag_response = await rag_engine.process_query(
             query=request.message,
             session_id=request.session_id,
             conversation_history=conversation_history,
-            top_k=5
+            top_k=3,
+            has_documents=(doc_count > 0)
         )
 
         # Save assistant message
@@ -249,14 +302,14 @@ async def delete_document(
     document_id: str,
     db: DBSession = Depends(get_db)
 ):
-    """Delete document and associated embeddings"""
+    """Delete document and associated index entries"""
     try:
-        from src.vector_db import get_vector_db
-        vector_db = get_vector_db()
-        vector_db.delete_document(document_id)
-        vector_db.persist()
+        from src.page_index import get_page_index
+        page_index = get_page_index()
+        page_index.delete_document(document_id)
+        page_index.persist()
     except Exception as e:
-        print(f"⚠️ Vector DB cleanup: {e}")
+        print(f"⚠️ Page index cleanup: {e}")
 
     success = SessionManager.delete_document(document_id, db)
     if not success:
@@ -271,12 +324,12 @@ async def delete_session(
 ):
     """Delete entire session and all associated data"""
     try:
-        from src.vector_db import get_vector_db
-        vector_db = get_vector_db()
-        vector_db.delete_session(session_id)
-        vector_db.persist()
+        from src.page_index import get_page_index
+        page_index = get_page_index()
+        page_index.delete_session(session_id)
+        page_index.persist()
     except Exception as e:
-        print(f"⚠️ Vector DB cleanup: {e}")
+        print(f"⚠️ Page index cleanup: {e}")
 
     success = SessionManager.delete_session(session_id, db)
     if not success:

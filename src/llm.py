@@ -36,9 +36,9 @@ class LLMClient:
         try:
             from openai import OpenAI
             if self.base_url:
-                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url)
+                self.client = OpenAI(api_key=self.api_key, base_url=self.base_url, timeout=30.0)
             else:
-                self.client = OpenAI(api_key=self.api_key)
+                self.client = OpenAI(api_key=self.api_key, timeout=30.0)
         except ImportError:
             print("⚠️ openai package not installed. Running without LLM.")
             self.client = None
@@ -134,11 +134,11 @@ Format your response as JSON with keys: executive_summary, key_findings, metrics
                 "tokens_used": 0
             }
         
-        # Format context with sources
+        # Format context with sources (limit chunks and truncate for speed)
         context_text = "\n\n".join([
             f"[Source: {chunk['metadata'].get('filename', 'Unknown')}, "
-            f"Page: {chunk['metadata'].get('page', 'N/A')}]\n{chunk['content']}"
-            for chunk in context_chunks[:5]
+            f"Page: {chunk['metadata'].get('page', 'N/A')}]\n{chunk['content'][:800]}"
+            for chunk in context_chunks[:3]
         ])
         
         prompt = f"""Answer the user's question using ONLY the provided context from their documents.
@@ -170,7 +170,7 @@ Answer:"""
                 model=self.model,
                 messages=messages,
                 temperature=0.2,
-                max_tokens=1000
+                max_tokens=600
             )
             
             content = response.choices[0].message.content
@@ -185,11 +185,8 @@ Answer:"""
                 for chunk in context_chunks[:3]
             ]
             
-            # Detect if chart is needed
-            needs_chart = self._detect_chart_need(query, content)
+            # Chart detection (skip extraction LLM call for speed)
             chart_data = None
-            if needs_chart:
-                chart_data = self._extract_chart_data(content, context_chunks)
             
             return {
                 "response": content,

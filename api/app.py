@@ -1,4 +1,4 @@
-from fastapi import FastAPI, HTTPException, Depends, Header, status
+from fastapi import FastAPI, HTTPException, Depends, Header, status, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
@@ -7,6 +7,7 @@ import os
 from dotenv import load_dotenv
 import sys
 import time
+from functools import lru_cache
 
 # Add parent directory to path
 project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,6 +16,17 @@ if project_root not in sys.path:
 
 from src.indexer import HybridIndexer
 from src.metrics import MetricsTracker
+
+# Rate limiting
+try:
+    from slowapi import Limiter
+    from slowapi.util import get_remote_address
+    from slowapi.errors import RateLimitExceeded
+    limiter = Limiter(key_func=get_remote_address)
+    RATE_LIMITING_ENABLED = True
+except ImportError:
+    RATE_LIMITING_ENABLED = False
+    limiter = None
 
 load_dotenv()
 
@@ -27,6 +39,17 @@ app = FastAPI(
     redoc_url="/redoc"
 )
 
+# Add rate limiter to app state
+if RATE_LIMITING_ENABLED and limiter:
+    app.state.limiter = limiter
+
+    @app.exception_handler(RateLimitExceeded)
+    async def rate_limit_handler(request: Request, exc: RateLimitExceeded):
+        return JSONResponse(
+            status_code=429,
+            content={"detail": "Rate limit exceeded. Please try again later."}
+        )
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
@@ -35,6 +58,27 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Simple response cache (TTL-based)
+_cache: Dict[str, tuple] = {}  # key -> (result, timestamp)
+CACHE_TTL = 300  # 5 minutes
+
+def get_cached(key: str):
+    """Get cached result if not expired"""
+    if key in _cache:
+        result, ts = _cache[key]
+        if time.time() - ts < CACHE_TTL:
+            return result
+        del _cache[key]
+    return None
+
+def set_cached(key: str, result):
+    """Cache a result"""
+    _cache[key] = (result, time.time())
+    # Evict old entries if cache grows too large
+    if len(_cache) > 100:
+        oldest = min(_cache, key=lambda k: _cache[k][1])
+        del _cache[oldest]
 
 # Global instances
 indexer: Optional[HybridIndexer] = None

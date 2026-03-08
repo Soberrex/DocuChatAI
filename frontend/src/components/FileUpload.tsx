@@ -1,22 +1,14 @@
 import React, { useCallback } from 'react';
 import { useDropzone } from 'react-dropzone';
-import { Box, Typography, Paper, LinearProgress } from '@mui/material';
-import CloudUploadIcon from '@mui/icons-material/CloudUpload';
+import { FileText } from 'lucide-react';
 
 interface FileUploadProps {
     onFileUpload: (file: File) => void;
     uploading: boolean;
 }
 
-const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload, uploading }) => {
-    const onDrop = useCallback(
-        (acceptedFiles: File[]) => {
-            if (acceptedFiles.length > 0) {
-                onFileUpload(acceptedFiles[0]);
-            }
-        },
-        [onFileUpload]
-    );
+const FileUpload = ({ onFileUpload, uploading }: FileUploadProps) => {
+    const onDrop = useCallback((files: File[]) => { if (files.length > 0) onFileUpload(files[0]); }, [onFileUpload]);
 
     const { getRootProps, getInputProps, isDragActive } = useDropzone({
         onDrop,
@@ -24,6 +16,7 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload, uploading }) => {
             'application/pdf': ['.pdf'],
             'application/vnd.openxmlformats-officedocument.wordprocessingml.document': ['.docx'],
             'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': ['.xlsx'],
+            'application/vnd.ms-excel': ['.xls'],
             'text/plain': ['.txt'],
             'text/csv': ['.csv'],
         },
@@ -32,41 +25,41 @@ const FileUpload: React.FC<FileUploadProps> = ({ onFileUpload, uploading }) => {
     });
 
     return (
-        <Paper
+        <div
             {...getRootProps()}
-            elevation={0}
-            sx={{
-                p: 3,
-                textAlign: 'center',
-                cursor: uploading ? 'not-allowed' : 'pointer',
-                border: '2px dashed',
-                borderColor: isDragActive ? 'primary.main' : 'rgba(255,255,255,0.12)',
-                bgcolor: isDragActive ? 'rgba(102, 126, 234, 0.08)' : 'rgba(255,255,255,0.02)',
-                borderRadius: 3,
-                transition: 'all 0.3s ease',
-                '&:hover': {
-                    borderColor: uploading ? 'rgba(255,255,255,0.12)' : 'primary.main',
-                    bgcolor: uploading ? 'transparent' : 'rgba(102, 126, 234, 0.05)',
-                },
-            }}
+            className={`w-full cursor-pointer transition-all ${uploading ? 'cursor-not-allowed opacity-70' : ''}`}
+            style={{ borderRadius: '16px' }}
         >
             <input {...getInputProps()} />
-            <CloudUploadIcon sx={{ fontSize: 40, color: 'primary.main', mb: 1, opacity: 0.7 }} />
-            <Typography variant="body2" sx={{ fontWeight: 500 }}>
-                {isDragActive ? 'Drop here' : 'Drop file or click to upload'}
-            </Typography>
-            <Typography variant="caption" display="block" sx={{ mt: 0.5, opacity: 0.5 }}>
-                PDF, DOCX, XLSX, TXT, CSV
-            </Typography>
-            {uploading && (
-                <Box sx={{ mt: 2 }}>
-                    <LinearProgress sx={{ borderRadius: 1 }} />
-                    <Typography variant="caption" sx={{ mt: 0.5, opacity: 0.6 }}>
-                        Processing...
-                    </Typography>
-                </Box>
-            )}
-        </Paper>
+            <div
+                className={`w-full flex flex-col items-center justify-center transition-all ${isDragActive ? 'grad-copper' : 'grad-copper-soft'}`}
+                style={{
+                    borderRadius: '16px',
+                    padding: '40px 20px',
+                    border: isDragActive ? '2px solid var(--color-accent)' : '1px solid rgba(224,90,43,0.2)',
+                }}
+            >
+                <div
+                    className="w-12 h-12 rounded-xl flex items-center justify-center"
+                    style={{ background: 'rgba(10,10,10,0.3)', marginBottom: '12px' }}
+                >
+                    {uploading ? (
+                        <div className="w-5 h-5 rounded-full animate-spin" style={{ border: '2px solid var(--color-accent)', borderTopColor: 'transparent' }} />
+                    ) : (
+                        <FileText size={22} style={{ color: 'var(--color-secondary)' }} />
+                    )}
+                </div>
+                <p className="text-sm font-medium" style={{ color: 'var(--color-primary)', marginBottom: '4px' }}>
+                    {isDragActive ? 'Drop your file here' : uploading ? 'Processing...' : 'Choose File or Drag & Drop it here'}
+                </p>
+                <p className="text-xs" style={{ color: 'var(--color-muted)' }}>xls, xlsx, csv, pdf, docx, txt Formats</p>
+                {uploading && (
+                    <div className="w-40 h-1 rounded-full overflow-hidden" style={{ background: 'rgba(10,10,10,0.3)', marginTop: '12px' }}>
+                        <div className="h-full rounded-full animate-pulse" style={{ width: '60%', backgroundColor: 'var(--color-accent)' }} />
+                    </div>
+                )}
+            </div>
+        </div>
     );
 };
 

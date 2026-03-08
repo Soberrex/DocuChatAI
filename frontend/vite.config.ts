@@ -12,4 +12,21 @@ export default defineConfig({
       },
     },
   },
+  build: {
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          // Split vendor bundles for better caching & smaller initial load
+          'vendor-react': ['react', 'react-dom'],
+          'vendor-charts': ['recharts'],
+          'vendor-motion': ['framer-motion'],
+          'vendor-ui': ['lucide-react', '@mui/material', '@emotion/react', '@emotion/styled'],
+        },
+      },
+    },
+    // Target modern browsers for smaller bundles
+    target: 'esnext',
+    // Reduce chunk size warnings
+    chunkSizeWarningLimit: 600,
+  },
 })

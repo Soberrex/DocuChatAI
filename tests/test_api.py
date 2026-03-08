@@ -16,17 +16,13 @@ API_KEY = "dev-test-key-12345"
 HEADERS = {"X-API-Key": API_KEY}
 
 
-# Setup fixture to ensure indexer is initialized
+# Setup fixture
 @pytest.fixture(scope="session", autouse=True)
 def setup_indexer():
     """Initialize the indexer before running tests"""
-    from api.app import indexer
+    import api.app as app_module
     from src.indexer import HybridIndexer
     
-    # Import the app module to access the global indexer
-    import api.app as app_module
-    
-    # Initialize indexer if not already done
     if app_module.indexer is None:
         print("\n🔧 Initializing indexer for tests...")
         try:
@@ -34,15 +30,11 @@ def setup_indexer():
             print("✅ Indexer initialized successfully")
         except Exception as e:
             print(f"⚠️  Warning: Could not initialize indexer: {e}")
-            print("   Search tests will be skipped")
     
     yield
-    
-    # Cleanup after tests (optional)
     print("\n🧹 Test cleanup complete")
 
 
-# Fixture to check if indexer is available
 @pytest.fixture(scope="session")
 def indexer_available():
     """Check if indexer is loaded"""
@@ -64,7 +56,6 @@ class TestBasicEndpoints:
     
     def test_health_check(self):
         """Test health check endpoint"""
-        time.sleep(0.1)  # Small delay to avoid overwhelming server
         response = client.get("/health")
         assert response.status_code == 200
         data = response.json()
@@ -78,13 +69,11 @@ class TestAuthentication:
     
     def test_search_without_api_key(self):
         """Test that search fails without API key"""
-        time.sleep(0.1)
         response = client.post("/search", json={"query": "test query"})
         assert response.status_code == 422  # Missing header
     
     def test_search_with_invalid_api_key(self):
         """Test that search fails with invalid API key"""
-        time.sleep(0.1)
         response = client.post(
             "/search",
             json={"query": "test query"},
@@ -94,7 +83,6 @@ class TestAuthentication:
     
     def test_stats_requires_authentication(self):
         """Test that stats endpoint requires authentication"""
-        time.sleep(0.1)
         response = client.get("/stats")
         assert response.status_code == 422  # Missing header
 
@@ -105,9 +93,8 @@ class TestSearchEndpoint:
     def test_search_with_valid_query(self, indexer_available):
         """Test search with valid query and API key"""
         if not indexer_available:
-            pytest.skip("Indexer not loaded - run 'python main.py init data/' first")
+            pytest.skip("Indexer not loaded")
         
-        time.sleep(0.2)
         response = client.post(
             "/search",
             json={"query": "calculate taxes"},
@@ -123,9 +110,8 @@ class TestSearchEndpoint:
     def test_search_with_top_k(self, indexer_available):
         """Test search with custom top_k parameter"""
         if not indexer_available:
-            pytest.skip("Indexer not loaded - run 'python main.py init data/' first")
+            pytest.skip("Indexer not loaded")
         
-        time.sleep(0.2)
         response = client.post(
             "/search",
             json={"query": "payment processing", "top_k": 5},
@@ -137,13 +123,11 @@ class TestSearchEndpoint:
     
     def test_search_empty_query(self):
         """Test that empty query is handled"""
-        time.sleep(0.2)
         response = client.post(
             "/search",
             json={"query": ""},
             headers=HEADERS
         )
-        # Should either reject or handle gracefully
         assert response.status_code in [200, 422]
 
 
@@ -152,7 +136,6 @@ class TestMetricsEndpoints:
     
     def test_get_stats(self):
         """Test getting statistics"""
-        time.sleep(0.2)
         response = client.get("/stats", headers=HEADERS)
         assert response.status_code == 200
         data = response.json()
@@ -162,14 +145,12 @@ class TestMetricsEndpoints:
     
     def test_get_recent_queries(self):
         """Test getting recent queries"""
-        time.sleep(0.2)
         response = client.get("/recent-queries", headers=HEADERS)
         assert response.status_code == 200
         assert isinstance(response.json(), list)
     
     def test_get_recent_queries_with_limit(self):
         """Test recent queries with custom limit"""
-        time.sleep(0.2)
         response = client.get("/recent-queries?limit=5", headers=HEADERS)
         assert response.status_code == 200
         data = response.json()
@@ -177,15 +158,13 @@ class TestMetricsEndpoints:
 
 
 class TestRateLimiting:
-    """Test rate limiting behavior (will be implemented in api/app.py)"""
+    """Test rate limiting behavior"""
     
     def test_rate_limit_not_exceeded_normal_use(self, indexer_available):
         """Test that normal usage doesn't trigger rate limits"""
         if not indexer_available:
-            pytest.skip("Indexer not loaded - run 'python main.py init data/' first")
+            pytest.skip("Indexer not loaded")
         
-        time.sleep(0.3)
-        # Make a few requests with delays
         for i in range(3):
             response = client.post(
                 "/search",
@@ -193,23 +172,7 @@ class TestRateLimiting:
                 headers=HEADERS
             )
             assert response.status_code == 200
-            time.sleep(0.5)  # Delay between requests
-    
-    @pytest.mark.skip(reason="Rate limiting not yet implemented")
-    def test_rate_limit_exceeded(self):
-        """Test that excessive requests trigger rate limiting"""
-        # This test will be enabled once rate limiting is implemented
-        responses = []
-        for i in range(100):
-            response = client.post(
-                "/search",
-                json={"query": f"spam {i}"},
-                headers=HEADERS
-            )
-            responses.append(response.status_code)
-        
-        # Should have at least one 429 (Too Many Requests)
-        assert 429 in responses
+            time.sleep(0.3)
 
 
 if __name__ == "__main__":

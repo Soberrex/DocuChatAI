@@ -1,7 +1,3 @@
-chromadb
-rank_bm25
-sentence-transformers
-
 # PDF Processing
 PyPDF2
 pdfplumber
@@ -10,6 +6,9 @@ pdfplumber
 python-docx
 openpyxl
 pandas
+
+# Text Search
+rank_bm25
 
 # Web Framework
 fastapi
@@ -35,3 +34,6 @@ sqlalchemy
 alembic
 requests
 
+# LLM
+openai
+tiktoken

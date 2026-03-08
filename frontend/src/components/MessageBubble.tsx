@@ -1,185 +1,183 @@
 import React, { useState } from 'react';
-import {
-    Box,
-    Paper,
-    Typography,
-    Avatar,
-    Chip,
-    Collapse,
-    IconButton,
-    Tooltip,
-} from '@mui/material';
-import type { Message as MessageType } from '../services/api';
-import PersonIcon from '@mui/icons-material/Person';
-import SmartToyIcon from '@mui/icons-material/SmartToy';
-import ExpandMoreIcon from '@mui/icons-material/ExpandMore';
-import ExpandLessIcon from '@mui/icons-material/ExpandLess';
-import VerifiedIcon from '@mui/icons-material/Verified';
-import ArticleIcon from '@mui/icons-material/Article';
+import { Copy, ThumbsUp, ThumbsDown, RotateCcw, ChevronDown, ChevronUp, FileText, Volume2 } from 'lucide-react';
 import ChartVisualizer from './ChartVisualizer';
 
-interface MessageBubbleProps {
-    message: MessageType;
+interface Source {
+    document_id: string;
+    filename: string;
+    chunk_index: number;
+    content: string;
+    relevance_score: number;
 }
 
-const MessageBubble: React.FC<MessageBubbleProps> = ({ message }) => {
-    const isUser = message.role === 'user';
+interface Message {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    created_at: string;
+    sources?: Source[];
+    confidence?: number;
+    chart_data?: any;
+}
+
+const MessageBubble = ({ message }: { message: Message }) => {
     const [sourcesOpen, setSourcesOpen] = useState(false);
-    const hasSources = !isUser && message.sources && message.sources.length > 0;
-    const hasChart = !isUser && message.chart_data;
+    const [copied, setCopied] = useState(false);
+    const isUser = message.role === 'user';
 
-    const getConfidenceColor = (confidence?: number) => {
-        if (!confidence) return 'default';
-        if (confidence >= 0.7) return 'success';
-        if (confidence >= 0.4) return 'warning';
-        return 'error';
+    const handleCopy = () => {
+        navigator.clipboard.writeText(message.content);
+        setCopied(true);
+        setTimeout(() => setCopied(false), 2000);
     };
 
-    const getConfidenceLabel = (confidence?: number) => {
-        if (!confidence) return '';
-        const pct = Math.round(confidence * 100);
-        return `${pct}% confident`;
+    const handleSpeak = () => {
+        const u = new SpeechSynthesisUtterance(message.content);
+        window.speechSynthesis.speak(u);
     };
 
-    return (
-        <Box
-            sx={{
-                display: 'flex',
-                justifyContent: isUser ? 'flex-end' : 'flex-start',
-                mb: 2,
-                width: '100%',
-            }}
-        >
-            <Box
-                sx={{
-                    display: 'flex',
-                    flexDirection: isUser ? 'row-reverse' : 'row',
-                    alignItems: 'flex-start',
-                    maxWidth: isUser ? '75%' : '85%', // Wider for assistant to fit charts
-                    width: '100%',
-                }}
-            >
-                <Avatar
-                    sx={{
-                        bgcolor: isUser
-                            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                            : 'linear-gradient(135deg, #f093fb 0%, #f5576c 100%)',
-                        background: isUser
-                            ? 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)'
-                            : 'linear-gradient(135deg, #00c9ff 0%, #92fe9d 100%)',
-                        mx: 1,
-                        width: 36,
-                        height: 36,
+    const formatInline = (text: string) => {
+        const parts = text.split(/(\*\*[^*]+\*\*)/g);
+        return parts.map((p, i) =>
+            p.startsWith('**') && p.endsWith('**')
+                ? <strong key={i} className="font-semibold" style={{ color: 'var(--color-primary)' }}>{p.slice(2, -2)}</strong>
+                : p
+        );
+    };
+
+    const renderTable = (lines: string[], key: number) => {
+        const rows = lines
+            .filter((l) => !l.match(/^\|[\s-:|]+\|$/))
+            .map((l) => l.split('|').filter((c) => c.trim() !== '').map((c) => c.trim()));
+        if (rows.length === 0) return null;
+        const header = rows[0];
+        const body = rows.slice(1);
+        return (
+            <div key={key} className="overflow-x-auto" style={{ margin: '12px 0', borderRadius: '10px', border: '1px solid var(--color-edge)' }}>
+                <table className="w-full text-sm" style={{ minWidth: '280px' }}>
+                    <thead>
+                        <tr style={{ backgroundColor: 'var(--color-elevated)' }}>
+                            {header.map((h, i) => (
+                                <th key={i} className="text-left text-[11px] font-semibold uppercase tracking-wider whitespace-nowrap" style={{ color: 'var(--color-primary)', padding: '10px 14px' }}>{h}</th>
+                            ))}
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {body.map((row, ri) => (
+                            <tr key={ri} style={{ borderTop: '1px solid var(--color-edge)' }}>
+                                {row.map((cell, ci) => (
+                                    <td key={ci} className="whitespace-nowrap" style={{ color: 'var(--color-secondary)', padding: '10px 14px' }}>{cell}</td>
+                                ))}
+                            </tr>
+                        ))}
+                    </tbody>
+                </table>
+            </div>
+        );
+    };
+
+    const renderContent = (text: string) => {
+        const lines = text.split('\n');
+        const els: React.ReactNode[] = [];
+        let tableLines: string[] = [];
+        let inTable = false;
+
+        lines.forEach((line, idx) => {
+            const t = line.trim();
+            if (t.startsWith('|') && t.endsWith('|')) { inTable = true; tableLines.push(t); return; }
+            if (inTable && !t.startsWith('|')) { els.push(renderTable(tableLines, idx)); tableLines = []; inTable = false; }
+            if (t.startsWith('## ')) { els.push(<h3 key={idx} className="font-bold text-base" style={{ color: 'var(--color-primary)', marginTop: '16px', marginBottom: '6px' }}>{t.substring(3)}</h3>); return; }
+            if (t.startsWith('### ')) { els.push(<h4 key={idx} className="font-semibold text-sm" style={{ color: 'var(--color-primary)', marginTop: '14px', marginBottom: '4px' }}>{t.substring(4)}</h4>); return; }
+            if (t.startsWith('• ') || t.startsWith('- ') || t.startsWith('* ')) {
+                els.push(<li key={idx} className="text-sm leading-relaxed list-disc" style={{ color: 'var(--color-secondary)', marginLeft: '20px', marginBottom: '2px' }}>{formatInline(t.substring(2))}</li>); return;
+            }
+            if (t) { els.push(<p key={idx} className="text-sm leading-relaxed" style={{ color: 'var(--color-secondary)', marginBottom: '2px' }}>{formatInline(t)}</p>); }
+        });
+        if (tableLines.length > 0) els.push(renderTable(tableLines, -1));
+        return els;
+    };
+
+    /* ── User Message ──────────────────────────────── */
+    if (isUser) {
+        return (
+            <div className="flex justify-end anim-fade" style={{ marginBottom: '16px' }}>
+                <div
+                    style={{
+                        backgroundColor: 'var(--color-card)',
+                        border: '1px solid var(--color-edge)',
+                        maxWidth: '75%',
+                        borderRadius: '16px 16px 4px 16px',
+                        padding: '14px 18px',
                     }}
                 >
-                    {isUser ? <PersonIcon fontSize="small" /> : <SmartToyIcon fontSize="small" />}
-                </Avatar>
+                    <p className="text-sm leading-relaxed break-words" style={{ color: 'var(--color-primary)' }}>{message.content}</p>
+                </div>
+            </div>
+        );
+    }
 
-                <Box sx={{ maxWidth: '100%', minWidth: 0 }}>
-                    <Paper
-                        elevation={0}
-                        sx={{
-                            p: 2,
-                            bgcolor: isUser ? '#667eea' : 'rgba(255,255,255,0.08)',
-                            color: isUser ? '#fff' : 'text.primary',
-                            borderRadius: isUser ? '18px 18px 4px 18px' : '18px 18px 18px 4px',
-                            border: isUser ? 'none' : '1px solid rgba(255,255,255,0.1)',
-                        }}
-                    >
-                        <Typography variant="body1" sx={{ whiteSpace: 'pre-wrap', lineHeight: 1.6 }}>
-                            {message.content}
-                        </Typography>
+    /* ── AI Message ────────────────────────────────── */
+    return (
+        <div className="anim-fade" style={{ marginBottom: '20px' }}>
+            <div
+                className="overflow-hidden"
+                style={{
+                    backgroundColor: 'var(--color-card)',
+                    border: '1px solid var(--color-edge)',
+                    borderRadius: '16px 16px 16px 4px',
+                    padding: '20px 24px',
+                }}
+            >
+                <div className="min-w-0 overflow-hidden">{renderContent(message.content)}</div>
 
-                        {/* Chart Rendering */}
-                        {hasChart && (
-                            <Box sx={{ mt: 2, width: '100%', minWidth: 300 }}>
-                                <ChartVisualizer
-                                    data={message.chart_data}
-                                    title={message.chart_data.title || "Data Visualization"}
-                                    type={message.chart_data.type || 'bar'}
-                                />
-                            </Box>
-                        )}
-                    </Paper>
+                {message.chart_data && <ChartVisualizer data={message.chart_data} />}
 
-                    {/* Metadata row: confidence + sources toggle */}
-                    {!isUser && (
-                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mt: 0.5, px: 1 }}>
-                            <Typography variant="caption" sx={{ opacity: 0.5 }}>
-                                {new Date(message.created_at).toLocaleTimeString()}
-                            </Typography>
-
-                            {message.confidence !== undefined && message.confidence > 0 && (
-                                <Tooltip title="RAG confidence score">
-                                    <Chip
-                                        icon={<VerifiedIcon />}
-                                        label={getConfidenceLabel(message.confidence)}
-                                        size="small"
-                                        color={getConfidenceColor(message.confidence) as any}
-                                        variant="outlined"
-                                        sx={{ height: 22, fontSize: '0.7rem' }}
-                                    />
-                                </Tooltip>
-                            )}
-
-                            {hasSources && (
-                                <Chip
-                                    icon={sourcesOpen ? <ExpandLessIcon /> : <ExpandMoreIcon />}
-                                    label={`${message.sources!.length} source${message.sources!.length > 1 ? 's' : ''}`}
-                                    size="small"
-                                    variant="outlined"
-                                    onClick={() => setSourcesOpen(!sourcesOpen)}
-                                    sx={{ height: 22, fontSize: '0.7rem', cursor: 'pointer' }}
-                                />
-                            )}
-                        </Box>
-                    )}
-
-                    {isUser && (
-                        <Typography variant="caption" sx={{ display: 'block', mt: 0.5, px: 1, opacity: 0.5, textAlign: 'right' }}>
-                            {new Date(message.created_at).toLocaleTimeString()}
-                        </Typography>
-                    )}
-
-                    {/* Collapsible sources */}
-                    {hasSources && (
-                        <Collapse in={sourcesOpen}>
-                            <Box sx={{ mt: 1, px: 1, maxWidth: '100%' }}>
-                                {message.sources!.map((source, idx) => (
-                                    <Paper
-                                        key={idx}
-                                        elevation={0}
-                                        sx={{
-                                            p: 1.5,
-                                            mb: 1,
-                                            bgcolor: 'rgba(102, 126, 234, 0.08)',
-                                            border: '1px solid rgba(102, 126, 234, 0.2)',
-                                            borderRadius: 2,
-                                        }}
-                                    >
-                                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5, mb: 0.5 }}>
-                                            <ArticleIcon sx={{ fontSize: 14, color: 'primary.main' }} />
-                                            <Typography variant="caption" sx={{ fontWeight: 600, color: 'primary.main' }}>
-                                                {source.filename || `Source ${idx + 1}`}
-                                            </Typography>
-                                            {source.relevance_score && (
-                                                <Typography variant="caption" sx={{ ml: 'auto', opacity: 0.6 }}>
-                                                    {Math.round(source.relevance_score * 100)}% relevant
-                                                </Typography>
-                                            )}
-                                        </Box>
-                                        <Typography variant="caption" sx={{ color: 'text.secondary', lineHeight: 1.4 }}>
-                                            {source.content?.substring(0, 200)}
-                                            {source.content && source.content.length > 200 ? '...' : ''}
-                                        </Typography>
-                                    </Paper>
+                {message.sources && message.sources.length > 0 && (
+                    <div style={{ marginTop: '16px', paddingTop: '14px', borderTop: '1px solid var(--color-edge)' }}>
+                        <button onClick={() => setSourcesOpen(!sourcesOpen)} className="flex items-center gap-1.5 text-xs active:opacity-70" style={{ color: 'var(--color-accent)', padding: '4px 0' }}>
+                            <FileText size={12} />
+                            <span>{message.sources.length} source{message.sources.length > 1 ? 's' : ''}</span>
+                            {sourcesOpen ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                        </button>
+                        {sourcesOpen && (
+                            <div className="anim-fade" style={{ marginTop: '8px' }}>
+                                {message.sources.map((src, i) => (
+                                    <div key={i} className="text-xs" style={{ backgroundColor: 'var(--color-elevated)', border: '1px solid var(--color-edge)', borderRadius: '10px', padding: '12px 14px', marginBottom: '6px' }}>
+                                        <span className="font-medium" style={{ color: 'var(--color-accent)' }}>{src.filename}</span>
+                                        <p className="line-clamp-2" style={{ color: 'var(--color-muted)', marginTop: '4px' }}>{src.content}</p>
+                                    </div>
                                 ))}
-                            </Box>
-                        </Collapse>
-                    )}
-                </Box>
-            </Box>
-        </Box>
+                            </div>
+                        )}
+                    </div>
+                )}
+
+                {message.confidence !== undefined && (
+                    <p className="text-[10px]" style={{ color: 'var(--color-muted)', marginTop: '12px' }}>✨ {Math.round(message.confidence * 100)}% confidence</p>
+                )}
+            </div>
+
+            {/* Action buttons */}
+            <div className="flex items-center gap-0.5" style={{ marginTop: '6px', marginLeft: '4px' }}>
+                {[
+                    { icon: <Copy size={14} />, fn: handleCopy, title: copied ? 'Copied!' : 'Copy' },
+                    { icon: <Volume2 size={14} />, fn: handleSpeak, title: 'Read aloud' },
+                    { icon: <ThumbsUp size={14} />, fn: () => { }, title: 'Helpful' },
+                    { icon: <ThumbsDown size={14} />, fn: () => { }, title: 'Not helpful' },
+                    { icon: <RotateCcw size={14} />, fn: () => { }, title: 'Regenerate' },
+                ].map((btn, i) => (
+                    <button
+                        key={i}
+                        onClick={btn.fn}
+                        title={btn.title}
+                        className="rounded transition-all active:scale-90"
+                        style={{ color: 'var(--color-muted)', padding: '6px' }}
+                    >
+                        {btn.icon}
+                    </button>
+                ))}
+            </div>
+        </div>
     );
 };
 

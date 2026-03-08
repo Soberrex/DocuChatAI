@@ -1,13 +1,75 @@
 <!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>DocuChat AI</title>
-  </head>
-  <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.tsx"></script>
-  </body>
+<html lang="en" class="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+  <meta name="description" content="DocuChat AI — Your intelligent document analysis assistant" />
+  <meta name="theme-color" content="#0A0A0A" />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <title>DocuChat AI</title>
+  <style>
+    /* Inline loading skeleton — shown instantly before JS loads */
+    .app-loader {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 100vh;
+      width: 100vw;
+      background: #0A0A0A;
+      flex-direction: column;
+      gap: 16px;
+      font-family: 'Inter', sans-serif
+    }
+
+    .app-loader .spinner {
+      width: 40px;
+      height: 40px;
+      border: 3px solid #222;
+      border-top-color: #E05A2B;
+      border-radius: 50%;
+      animation: spin .8s linear infinite
+    }
+
+    .app-loader .text {
+      color: #6B7280;
+      font-size: 14px;
+      letter-spacing: 0.5px
+    }
+
+    @keyframes spin {
+      to {
+        transform: rotate(360deg)
+      }
+    }
+
+    .light .app-loader {
+      background: #FAFAFA
+    }
+
+    .light .app-loader .spinner {
+      border-color: #E5E5E5;
+      border-top-color: #D94F20
+    }
+
+    .light .app-loader .text {
+      color: #999
+    }
+  </style>
+</head>
+
+<body>
+  <div id="root">
+    <!-- Loading skeleton — replaced by React once JS loads -->
+    <div class="app-loader">
+      <div class="spinner"></div>
+      <div class="text">Loading DocuChat AI…</div>
+    </div>
+  </div>
+  <script type="module" src="/src/main.tsx"></script>
+</body>
+
 </html>

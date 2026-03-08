@@ -62,7 +62,14 @@ engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,  # Verify connections before using
     pool_size=10,
-    max_overflow=20
+    max_overflow=20,
+    pool_recycle=300,  # Recycle connections every 5 minutes
+    connect_args={
+        "keepalives": 1,
+        "keepalives_idle": 30,
+        "keepalives_interval": 10,
+        "keepalives_count": 5,
+    }
 )
 
 # Create session factory
