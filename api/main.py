@@ -68,9 +68,11 @@ async def debug_info():
     # Test database connection
     try:
         from src.database import engine
+        from src.page_index import get_page_index
         with engine.connect() as conn:
             conn.execute(__import__('sqlalchemy').text("SELECT 1"))
         info["database"] = "connected"
+        info["indexed_chunks_in_memory"] = len(get_page_index().chunks)
     except Exception as e:
         info["database"] = f"error: {str(e)}"
     return info
