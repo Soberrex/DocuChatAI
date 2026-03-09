@@ -13,7 +13,6 @@ RUN npm run build
 # Runtime Stage
 FROM python:3.11-slim
 
-# Set working directory
 WORKDIR /app
 
 # Install system dependencies
@@ -25,16 +24,13 @@ RUN apt-get update && apt-get install -y \
 # Copy requirements first for better caching
 COPY requirements.txt .
 
-# Set up virtual environment to avoid system package conflicts
+# Set up virtual environment
 ENV VIRTUAL_ENV=/opt/venv
 RUN python3 -m venv $VIRTUAL_ENV
 ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip
-
-# Install Python dependencies (torch removed - not used by any source code)
-
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application code
@@ -44,14 +40,10 @@ COPY . .
 COPY --from=frontend-builder /app/frontend/dist /app/frontend/dist
 
 # Create necessary directories
-RUN mkdir -p chroma_db
+RUN mkdir -p data
 
-# Expose port (Removed to let Railway manage routing via PORT env var)
-# EXPOSE 8000 -> Caused routing mismatch (App on $PORT, LB on 8000)
+# Expose port for Render
+EXPOSE 8000
 
-# Health check (Let Railway handle this via TCP check)
-# HEALTHCHECK removed to prevent conflict with dynamic PORT assignment
-
-# Run the application
-# Run on port 8000 hardcoded to match Railway's load balancer setting
-CMD sh -c "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level debug --proxy-headers --forwarded-allow-ips '*'"
+# Run the application (uses PORT env var set by hosting platform)
+CMD uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}

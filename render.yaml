@@ -1,0 +1,21 @@
+# render.yaml - Render Blueprint for DocuChat AI
+# https://render.com/docs/blueprint-spec
+
+services:
+  - type: web
+    name: docuchat-ai
+    runtime: docker
+    dockerfilePath: ./Dockerfile
+    plan: free
+    healthCheckPath: /health
+    envVars:
+      - key: DATABASE_URL
+        sync: false
+      - key: OPENROUTER_API_KEY
+        sync: false
+      - key: API_KEY
+        sync: false
+      - key: VITE_API_URL
+        sync: false
+      - key: VITE_API_KEY
+        sync: false
