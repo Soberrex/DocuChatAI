@@ -74,15 +74,7 @@ async def upload_document(
                 await out_file.write(content)
                 file_size += len(content)
 
-        # Process document using the temp file path instead of loading all into RAM
-        processor = DocumentProcessor()
-        result = await processor.process_document(
-            file_path=temp_path,
-            filename=file.filename,
-            file_size=file_size
-        )
-
-        # Create document record
+        # Create document record with initial metadata
         doc_id = str(uuid.uuid4())
         document = DBDocument(
             id=doc_id,
@@ -90,66 +82,70 @@ async def upload_document(
             filename=f"{doc_id}_{file.filename}",
             original_filename=file.filename,
             file_size=file_size,
-            file_type=result['file_type'],
+            file_type=DocumentProcessor.detect_file_type(file.filename),
             status='processing',
             doc_metadata={
-                'chunk_count': len(result['chunks']),
-                'file_kept': result['should_keep_file']
+                'chunk_count': 0,
+                'file_kept': True
             }
         )
         db.add(document)
         db.commit()
 
-        # Add chunks to memory index synchronously to guarantee availability
-        from src.page_index import get_page_index
-        page_index = get_page_index()
-        chunks_added = page_index.add_document_chunks(
-            chunks=result['chunks'],
-            document_id=doc_id,
-            filename=file.filename,
-            file_type=result['file_type']
-        )
-        page_index.persist()
-        print(f"✅ Indexed {chunks_added} chunks for {file.filename}")
-        
-        # Update initial metadata with chunk count
-        document.doc_metadata['chunk_count'] = chunks_added
-        db.commit()
-
-        # Background Task: Summary Generation
+        # Define background task for heavy extraction
         import asyncio
-        async def _process_upload_background():
+        async def _process_upload_background(file_path: str, bg_doc_id: str, original_name: str, file_size_bg: int):
             try:
-                print(f"🔄 Starting background summary for {file.filename}...")
+                print(f"🔄 Starting background extraction for {original_name}...")
+                
+                # 1. Heavy extraction (takes >100s for large PDFs, safe in background)
+                processor = DocumentProcessor()
+                result = await processor.process_document(
+                    file_path=file_path,
+                    filename=original_name,
+                    file_size=file_size_bg
+                )
+                
+                # 2. Add chunks to memory index and persist to disk
+                from src.page_index import get_page_index
+                page_index = get_page_index()
+                chunks_added = page_index.add_document_chunks(
+                    chunks=result['chunks'],
+                    document_id=bg_doc_id,
+                    filename=original_name,
+                    file_type=result['file_type']
+                )
+                page_index.persist()
+                print(f"✅ Indexed {chunks_added} chunks for {original_name}")
+
+                # 3. Generate initial summary
                 from src.database import SessionLocal
                 from src.rag_engine import get_rag_engine
                 bg_db = SessionLocal()
                 try:
-                    doc = bg_db.query(DBDocument).filter(DBDocument.id == doc_id).first()
+                    doc = bg_db.query(DBDocument).filter(DBDocument.id == bg_doc_id).first()
                     if not doc:
                         return
 
-                    doc.doc_metadata = {
-                        **(doc.doc_metadata or {})
-                    }
-                    
                     rag_engine = get_rag_engine()
                     summary_result = await rag_engine.generate_document_summary(
-                        document_id=doc_id,
+                        document_id=bg_doc_id,
                         document_text=result['text'][:10000],
                         file_type=result['file_type']
                     )
-                    
+
+                    # 4. Finalize document save
                     doc.doc_metadata = {
                         **(doc.doc_metadata or {}),
+                        'chunk_count': chunks_added,
+                        'file_kept': result['should_keep_file'],
                         'summary': summary_result.get('summary'),
                         'suggested_charts': summary_result.get('suggested_charts', [])
                     }
                     doc.status = 'ready'
                     doc.indexed_at = datetime.utcnow()
                     bg_db.commit()
-                    print(f"✅ Background processing complete for {file.filename}")
-                    
+                    print(f"✅ Completed processing for {original_name}")
                 except Exception as inner_e:
                     print(f"❌ Error in background db update: {inner_e}")
                     if doc:
@@ -158,21 +154,20 @@ async def upload_document(
                         bg_db.commit()
                 finally:
                     bg_db.close()
-                    
             except Exception as e:
                 print(f"⚠️ Background processing failed completely: {e}")
 
         # Start background task
-        asyncio.create_task(_process_upload_background())
+        import asyncio
+        asyncio.create_task(_process_upload_background(temp_path, doc_id, file.filename, file_size))
 
-        return UploadResponse(
-            document_id=doc_id,
-            filename=file.filename,
-            status='processing',
-            message=f"Upload accepted. Processing {len(result['chunks'])} chunks in background.",
-            file_kept=result['should_keep_file'],
-            summary=None
-        )
+        return {
+            "document_id": doc_id,
+            "filename": file.filename,
+            "status": "processing",
+            "message": "Upload accepted. Processing in background to prevent timeout.",
+            "file_kept": True
+        }
 
     except Exception as e:
         traceback.print_exc()
