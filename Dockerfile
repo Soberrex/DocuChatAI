@@ -33,8 +33,7 @@ ENV PATH="$VIRTUAL_ENV/bin:$PATH"
 # Install Python dependencies
 RUN pip install --no-cache-dir --upgrade pip
 
-# Install CPU-only PyTorch to prevent installing 2GB+ CUDA binaries
-RUN pip install --no-cache-dir torch --index-url https://download.pytorch.org/whl/cpu
+# Install Python dependencies (torch removed - not used by any source code)
 
 RUN pip install --no-cache-dir -r requirements.txt
 
@@ -55,4 +54,4 @@ RUN mkdir -p chroma_db
 
 # Run the application
 # Run on port 8000 hardcoded to match Railway's load balancer setting
-CMD sh -c "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000}"
+CMD sh -c "uvicorn api.main:app --host 0.0.0.0 --port ${PORT:-8000} --log-level debug --proxy-headers --forwarded-allow-ips '*'"
