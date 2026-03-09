@@ -54,6 +54,27 @@ app.include_router(api_router, prefix="/api", tags=["API"])
 async def health_check():
     return {"status": "healthy"}
 
+@app.get("/debug")
+async def debug_info():
+    """Debug endpoint to diagnose issues"""
+    import os
+    info = {
+        "status": "online",
+        "database_url_set": bool(os.getenv("DATABASE_URL")),
+        "openrouter_key_set": bool(os.getenv("OPENROUTER_API_KEY")),
+        "api_key_set": bool(os.getenv("API_KEY")),
+        "environment": os.getenv("RENDER", "local"),
+    }
+    # Test database connection
+    try:
+        from src.database import engine
+        with engine.connect() as conn:
+            conn.execute(__import__('sqlalchemy').text("SELECT 1"))
+        info["database"] = "connected"
+    except Exception as e:
+        info["database"] = f"error: {str(e)}"
+    return info
+
 # Frontend serving
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "frontend", "dist")
 logger.info(f"Frontend path: {frontend_path}, exists: {os.path.exists(frontend_path)}")
