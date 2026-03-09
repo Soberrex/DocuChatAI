@@ -33,6 +33,11 @@ app.add_middleware(
 # Include API routes
 app.include_router(api_router, prefix="/api", tags=["API"])
 
+# Health check (must be before SPA catch-all)
+@app.get("/health")
+async def health_check():
+    return {"status": "healthy"}
+
 # Serve frontend static files (only if directory exists - for production)
 from fastapi.staticfiles import StaticFiles
 from fastapi.responses import FileResponse
@@ -40,14 +45,16 @@ from fastapi.responses import FileResponse
 frontend_path = os.path.join(os.path.dirname(os.path.dirname(__file__)), "frontend", "dist")
 
 if os.path.exists(frontend_path):
-    # Mount static assets (JS, CSS, images)
-    app.mount("/assets", StaticFiles(directory=os.path.join(frontend_path, "assets")), name="assets")
+    # Mount static assets (JS, CSS, images) - only if assets dir exists
+    assets_path = os.path.join(frontend_path, "assets")
+    if os.path.exists(assets_path):
+        app.mount("/assets", StaticFiles(directory=assets_path), name="assets")
     
     # Catch-all route for SPA (client-side routing)
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
-        # Allow API requests to pass through (though they should be caught by prefix above)
-        if full_path.startswith("api/"):
+        # Allow API and health requests to pass through
+        if full_path.startswith("api/") or full_path == "health":
             raise HTTPException(status_code=404, detail="Not Found")
             
         # Check if file exists in root (e.g. favicon.ico, robots.txt)
@@ -56,11 +63,10 @@ if os.path.exists(frontend_path):
             return FileResponse(file_path)
             
         # Fallback to index.html for React routing
-        return FileResponse(os.path.join(frontend_path, "index.html"))
-
-@app.get("/health")
-async def health_check():
-    return {"status": "healthy"}
+        index_path = os.path.join(frontend_path, "index.html")
+        if os.path.exists(index_path):
+            return FileResponse(index_path)
+        raise HTTPException(status_code=404, detail="Frontend not built")
 
 if __name__ == "__main__":
     import uvicorn
