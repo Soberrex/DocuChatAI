@@ -59,16 +59,27 @@ async def upload_document(
         sid = session_id or str(uuid.uuid4())
         SessionManager.get_or_create_session(sid, db)
 
-        # Read file
-        file_content = await file.read()
-        file_size = len(file_content)
+        # Stream file to persistent data directory to avoid memory spike
+        import os
+        import aiofiles
+        
+        # Ensure temp directory exists on the persistent disk
+        temp_dir = "/app/data/temp"
+        os.makedirs(temp_dir, exist_ok=True)
+        temp_path = os.path.join(temp_dir, f"{sid}_{file.filename}")
+        
+        file_size = 0
+        async with aiofiles.open(temp_path, 'wb') as out_file:
+            while content := await file.read(1024 * 1024):  # 1MB chunks
+                await out_file.write(content)
+                file_size += len(content)
 
-        # Process document (extract text, chunk)
+        # Process document using the temp file path instead of loading all into RAM
         processor = DocumentProcessor()
         result = await processor.process_document(
-            file_content,
-            file.filename,
-            file_size
+            file_path=temp_path,
+            filename=file.filename,
+            file_size=file_size
         )
 
         # Create document record

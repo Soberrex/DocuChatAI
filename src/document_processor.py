@@ -39,7 +39,7 @@ class DocumentProcessor:
     
     @staticmethod
     async def extract_text(
-        file_content: bytes,
+        file_path: str,
         filename: str,
         file_size: int
     ) -> Dict[str, any]:
@@ -60,15 +60,16 @@ class DocumentProcessor:
         
         try:
             if file_type == 'pdf':
-                text, metadata = await DocumentProcessor._extract_from_pdf(file_content)
+                text, metadata = await DocumentProcessor._extract_from_pdf(file_path)
             elif file_type == 'docx':
-                text, metadata = await DocumentProcessor._extract_from_docx(file_content)
+                text, metadata = await DocumentProcessor._extract_from_docx(file_path)
             elif file_type in ['xlsx', 'xls', 'csv']:
                 text, metadata = await DocumentProcessor._extract_from_spreadsheet(
-                    file_content, file_type
+                    file_path, file_type
                 )
             elif file_type == 'txt':
-                text = file_content.decode('utf-8', errors='ignore')
+                async with aiofiles.open(file_path, 'r', encoding='utf-8', errors='ignore') as f:
+                    text = await f.read()
                 metadata = {'pages': 1}
             else:
                 raise ValueError(f"Unsupported file type: {file_type}")
@@ -84,18 +85,20 @@ class DocumentProcessor:
             raise Exception(f"Error extracting text from {filename}: {str(e)}")
     
     @staticmethod
-    async def _extract_from_pdf(file_content: bytes) -> tuple[str, dict]:
+    async def _extract_from_pdf(file_path: str) -> tuple[str, dict]:
         """Extract text from PDF (Lightweight PyPDF2 only to prevent OOM)"""
         text_parts = []
         metadata = {'pages': 0}
         
         try:
-            pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
-            metadata['pages'] = len(pdf_reader.pages)
-            for page in pdf_reader.pages:
-                text = page.extract_text()
-                if text:
-                    text_parts.append(text)
+            # We open the file lazily from disk instead of loading it all into a BytesIO stream
+            with open(file_path, 'rb') as f:
+                pdf_reader = PyPDF2.PdfReader(f)
+                metadata['pages'] = len(pdf_reader.pages)
+                for page in pdf_reader.pages:
+                    text = page.extract_text()
+                    if text:
+                        text_parts.append(text)
         except Exception as e:
             print(f"⚠️ PyPDF2 failed: {e}")
             raise Exception(f"Failed to read PDF: {str(e)}")
@@ -103,9 +106,9 @@ class DocumentProcessor:
         return '\n\n'.join(text_parts), metadata
     
     @staticmethod
-    async def _extract_from_docx(file_content: bytes) -> tuple[str, dict]:
+    async def _extract_from_docx(file_path: str) -> tuple[str, dict]:
         """Extract text from DOCX"""
-        doc = DocxDocument(io.BytesIO(file_content))
+        doc = DocxDocument(file_path)
         text_parts = [paragraph.text for paragraph in doc.paragraphs if paragraph.text.strip()]
         
         metadata = {
@@ -117,14 +120,14 @@ class DocumentProcessor:
     
     @staticmethod
     async def _extract_from_spreadsheet(
-        file_content: bytes,
+        file_path: str,
         file_type: str
     ) -> tuple[str, dict]:
         """Extract text from Excel/CSV"""
         if file_type == 'csv':
-            df = pd.read_csv(io.BytesIO(file_content))
+            df = pd.read_csv(file_path)
         else:
-            df = pd.read_excel(io.BytesIO(file_content), sheet_name=None)
+            df = pd.read_excel(file_path, sheet_name=None)
             # Combine all sheets
             if isinstance(df, dict):
                 dfs = list(df.values())
@@ -201,7 +204,7 @@ class DocumentProcessor:
     
     @staticmethod
     async def process_document(
-        file_content: bytes,
+        file_path: str,
         filename: str,
         file_size: int
     ) -> Dict:
@@ -218,7 +221,7 @@ class DocumentProcessor:
         """
         # Extract text
         extraction_result = await DocumentProcessor.extract_text(
-            file_content, filename, file_size
+            file_path, filename, file_size
         )
         
         # Chunk text
