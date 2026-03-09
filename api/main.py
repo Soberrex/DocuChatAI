@@ -45,6 +45,13 @@ async def startup_event():
         logger.info("Database tables initialized")
     except Exception as e:
         logger.error(f"Database init failed: {e}")
+        
+    try:
+        from src.page_index import get_page_index
+        idx = get_page_index()
+        logger.info(f"Page index loaded on startup: {len(idx.chunks)} chunks in memory")
+    except Exception as e:
+        logger.error(f"Page index init failed: {e}")
 
 # Include API routes
 app.include_router(api_router, prefix="/api", tags=["API"])
