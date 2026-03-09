@@ -104,7 +104,7 @@ if os.path.exists(frontend_path):
     @app.get("/{full_path:path}")
     async def serve_spa(full_path: str):
         # Let API, health, and docs routes pass through
-        if full_path.startswith("api/") or full_path in ("health", "docs", "redoc", "openapi.json"):
+        if full_path.startswith("api/") or full_path in ("health", "debug", "docs", "redoc", "openapi.json"):
             raise HTTPException(status_code=404, detail="Not Found")
 
         # Serve static files from frontend dist
