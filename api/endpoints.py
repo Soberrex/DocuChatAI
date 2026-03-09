@@ -89,27 +89,29 @@ async def upload_document(
         db.add(document)
         db.commit()
 
-        # Background Task: Indexing + Summary
+        # Add chunks to memory index synchronously to guarantee availability
+        from src.page_index import get_page_index
+        page_index = get_page_index()
+        chunks_added = page_index.add_document_chunks(
+            chunks=result['chunks'],
+            document_id=doc_id,
+            filename=file.filename,
+            file_type=result['file_type']
+        )
+        page_index.persist()
+        print(f"✅ Indexed {chunks_added} chunks for {file.filename}")
+        
+        # Update initial metadata with chunk count
+        document.doc_metadata['chunk_count'] = chunks_added
+        db.commit()
+
+        # Background Task: Summary Generation
         import asyncio
         async def _process_upload_background():
             try:
-                print(f"🔄 Starting background processing for {file.filename}...")
+                print(f"🔄 Starting background summary for {file.filename}...")
                 from src.database import SessionLocal
-                from src.page_index import get_page_index
                 from src.rag_engine import get_rag_engine
-                
-                # 1. Indexing (Page Index)
-                page_index = get_page_index()
-                chunks_added = page_index.add_document_chunks(
-                    chunks=result['chunks'],
-                    document_id=doc_id,
-                    filename=file.filename,
-                    file_type=result['file_type']
-                )
-                page_index.persist()
-                print(f"✅ Indexed {chunks_added} chunks for {file.filename}")
-
-                # 2. Summary Generation
                 bg_db = SessionLocal()
                 try:
                     doc = bg_db.query(DBDocument).filter(DBDocument.id == doc_id).first()
@@ -117,8 +119,7 @@ async def upload_document(
                         return
 
                     doc.doc_metadata = {
-                        **(doc.doc_metadata or {}),
-                        'chunk_count': chunks_added
+                        **(doc.doc_metadata or {})
                     }
                     
                     rag_engine = get_rag_engine()

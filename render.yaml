@@ -19,3 +19,7 @@ services:
         sync: false
       - key: VITE_API_KEY
         sync: false
+    disk:
+      name: docuchat-data
+      mountPath: /app/data
+      sizeGB: 1
