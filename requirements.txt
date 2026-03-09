@@ -1,6 +1,5 @@
 # PDF Processing
 PyPDF2
-pdfplumber
 
 # Document Processing
 python-docx

@@ -7,7 +7,6 @@ import io
 from typing import List, Dict, Optional, BinaryIO
 from pathlib import Path
 import PyPDF2
-import pdfplumber
 from docx import Document as DocxDocument
 import pandas as pd
 import aiofiles
@@ -86,26 +85,21 @@ class DocumentProcessor:
     
     @staticmethod
     async def _extract_from_pdf(file_content: bytes) -> tuple[str, dict]:
-        """Extract text from PDF"""
+        """Extract text from PDF (Lightweight PyPDF2 only to prevent OOM)"""
         text_parts = []
         metadata = {'pages': 0}
         
         try:
-            # Try pdfplumber first (better text extraction)
-            with pdfplumber.open(io.BytesIO(file_content)) as pdf:
-                metadata['pages'] = len(pdf.pages)
-                for page in pdf.pages:
-                    page_text = page.extract_text()
-                    if page_text:
-                        text_parts.append(page_text)
-        except Exception as e:
-            # Fallback to PyPDF2
-            print(f"pdfplumber failed, trying PyPDF2: {e}")
             pdf_reader = PyPDF2.PdfReader(io.BytesIO(file_content))
             metadata['pages'] = len(pdf_reader.pages)
             for page in pdf_reader.pages:
-                text_parts.append(page.extract_text())
-        
+                text = page.extract_text()
+                if text:
+                    text_parts.append(text)
+        except Exception as e:
+            print(f"⚠️ PyPDF2 failed: {e}")
+            raise Exception(f"Failed to read PDF: {str(e)}")
+            
         return '\n\n'.join(text_parts), metadata
     
     @staticmethod
