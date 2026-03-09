@@ -61,8 +61,8 @@ if not DATABASE_URL:
 engine = create_engine(
     DATABASE_URL,
     pool_pre_ping=True,  # Verify connections before using
-    pool_size=10,
-    max_overflow=20,
+    pool_size=3,
+    max_overflow=5,
     pool_recycle=300,  # Recycle connections every 5 minutes
     connect_args={
         "keepalives": 1,

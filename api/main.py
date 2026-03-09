@@ -17,6 +17,7 @@ logger = logging.getLogger(__name__)
 
 # Import routers
 from api.endpoints import router as api_router
+from src.database import init_db
 
 # Initialize FastAPI app
 app = FastAPI(
@@ -35,6 +36,15 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Initialize database tables on startup
+@app.on_event("startup")
+async def startup_event():
+    try:
+        init_db()
+        logger.info("Database tables initialized")
+    except Exception as e:
+        logger.error(f"Database init failed: {e}")
 
 # Include API routes
 app.include_router(api_router, prefix="/api", tags=["API"])
