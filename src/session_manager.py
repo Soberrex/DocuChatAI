@@ -115,8 +115,17 @@ class SessionManager:
             if not document:
                 return False
             
-            # TODO: Delete from vector database
-            # TODO: Delete from file storage if applicable
+            # Delete physical file from persistent storage
+            import os
+            try:
+                # Based on the naming convention in api/endpoints.py: {session_id}_{filename}
+                # But document.filename already contains the doc_id prefix: f"{doc_id}_{file.filename}"
+                # So we check if temp_path uses the document.session_id or document.id prefix
+                temp_path = os.path.join("/app/data/temp", f"{document.session_id}_{document.original_filename}")
+                if os.path.exists(temp_path):
+                    os.remove(temp_path)
+            except Exception as file_e:
+                print(f"⚠️ Warning: Could not delete physical file: {file_e}")
             
             db.delete(document)
             db.commit()
