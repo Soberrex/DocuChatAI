@@ -4,7 +4,7 @@
 
 ### Enterprise-Grade RAG Chatbot for Intelligent Document Interaction
 
-[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Visit_Site-blue?style=for-the-badge)](https://docuchartai-production.up.railway.app/)
+[![Live Demo](https://img.shields.io/badge/🚀_Live_Demo-Visit_Site-blue?style=for-the-badge)](https://docuchat-ai-wp7x.onrender.com/)
 [![License](https://img.shields.io/badge/License-MIT-green.svg?style=for-the-badge)](LICENSE)
 [![Python](https://img.shields.io/badge/Python-3.11+-blue.svg?style=for-the-badge&logo=python)](https://www.python.org/)
 [![FastAPI](https://img.shields.io/badge/FastAPI-0.104+-009688.svg?style=for-the-badge&logo=fastapi)](https://fastapi.tiangolo.com/)
@@ -45,7 +45,8 @@ DocuChat AI eliminates this friction by combining BM25 sparse retrieval, LLM-pow
 
 | Feature | Description |
 |---------|-------------|
-| 📄 **Multi-Format Document Support** | Upload and process PDF, DOCX, XLSX, CSV, and TXT files up to 50MB |
+| 📄 **Large Document Support** | Upload massive files (800+ page PDFs) with 0-memory-footprint disk streaming |
+| ⚡ **Async Background Processing** | Heavy extraction pipelines run in background tasks to prevent HTTP timeouts |
 | 🔍 **BM25 + TF-IDF Hybrid Search** | Lightweight, zero-dependency retrieval engine with Okapi BM25 scoring and IDF boosting |
 | 💡 **Auto-Generated Summaries** | Comprehensive document summaries generated on upload via LLM |
 | 📊 **Smart Data Visualization** | Detects tabular/numerical data and renders interactive Bar, Line, and Pie charts |
@@ -121,13 +122,18 @@ graph TB
 ```
 User uploads file → Backend receives via FastAPI UploadFile
   ↓
-DocumentProcessor.detect_file_type() → Identifies PDF / DOCX / XLSX / CSV / TXT
+Endpoint streams raw bytes directly to **Persistent Disk** (/app/data/temp/) to bypass 512MB RAM constraints
   ↓
-DocumentProcessor.extract_text() → Extracts text using PyPDF2, pdfplumber, python-docx, or pandas
+DocumentProcessor lazy-loads file from disk → Extracts text (PyPDF2, pdfplumber, python-docx, pandas)
   ↓
+Endpoint immediately returns HTTP 200 OK to browser (preventing 100s Load Balancer Timeouts)
+  ↓
+*(Background Task begins)*
 DocumentProcessor.chunk_text() → Splits into 2000-char chunks with 400-char overlap
   ↓
 PageIndex.add_document_chunks() → Tokenizes, calculates TF, rebuilds IDF scores
+  ↓
+PageIndex saves updated BM25 Index to **Persistent Disk** (/app/data/page_index.json)
   ↓
 LLMClient.generate_summary() → Produces structured summary via LLM
   ↓
@@ -202,7 +208,7 @@ Chart linked to Message via Chart model in database
 | Technology | Purpose |
 |-----------|---------|
 | [Docker](https://www.docker.com/) | Multi-stage containerized builds (Node + Python) |
-| [Railway](https://railway.app/) | Cloud hosting with auto-deploy from Dockerfile |
+| [Render](https://render.com/) | Cloud hosting with Persistent Disk architecture |
 | [GitHub](https://github.com/) | Source control and CI/CD integration |
 
 ---
@@ -268,7 +274,7 @@ DocuChartAI/
 ├── assets/                       # Static assets
 │   └── screenshot.png           # Application screenshot
 ├── Dockerfile                    # Multi-stage Docker build (Node 18 + Python 3.11)
-├── railway.json                  # Railway deployment configuration
+├── render.yaml                   # Render deployment configuration with Persistent Disk
 ├── requirements.txt              # Python dependencies
 ├── .env.example                  # Environment variable template
 ├── .dockerignore                 # Docker build exclusions
@@ -629,31 +635,31 @@ A comprehensive Postman collection is included at `tests/postman_collection.json
 
 ## 🚢 Deployment
 
-### Railway (Recommended)
+### Render Free Tier (Recommended)
 
-This project includes Railway-specific configuration for one-click deployment.
+This project includes a `render.yaml` Blueprint explicitly designed to bypass Render's strict Free Tier limitations (512MB RAM and 100s Load Balancer timeouts) by leveraging **Background Tasks** and **Persistent Disks**.
 
 1. **Fork** this repository on [GitHub](https://github.com/Soberrex/DocuChartAI)
-2. **Create a new project** on [Railway](https://railway.app/) → **Deploy from GitHub repo**
-3. **Set environment variables** in the Railway dashboard:
-   - `DATABASE_URL` — Your Supabase PostgreSQL connection string
+2. Go to the [Render Dashboard](https://dashboard.render.com/) → **Blueprints** → **New Blueprint Instance**
+3. Connect your forked GitHub repository.
+4. Render will automatically read `render.yaml` and provision:
+   - A Web Service running the Dockerfile
+   - A 1GB Persistent Disk mounted at `/app/data` to save the SQLite database and BM25 `page_index.json`
+5. **Set environment variables** in the Render dashboard:
    - `OPENROUTER_API_KEY` — Your LLM API key
-   - `API_KEY` — Your secret API key
-   - `VITE_API_URL` — Leave empty (same-origin in production)
-4. Railway auto-detects `railway.json` and `Dockerfile`, then builds and deploys
+   - `API_KEY` — Your secret backend API key
 
-**`railway.json` configuration:**
-```json
-{
-  "build": {
-    "builder": "DOCKERFILE",
-    "dockerfilePath": "Dockerfile"
-  },
-  "deploy": {
-    "restartPolicyType": "ON_FAILURE",
-    "restartPolicyMaxRetries": 10
-  }
-}
+**`render.yaml` configuration highlights:**
+```yaml
+services:
+  - type: web
+    name: docuchat-ai
+    env: docker
+    plan: free
+    disk:
+      name: persistent-data
+      mountPath: /app/data
+      sizeGB: 1
 ```
 
 ### Docker (Self-Hosted)

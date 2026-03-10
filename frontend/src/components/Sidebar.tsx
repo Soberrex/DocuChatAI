@@ -10,6 +10,8 @@ import {
     MessageSquare,
     PanelLeftOpen,
     PanelLeftClose,
+    LogOut,
+    User,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -23,6 +25,12 @@ interface SidebarProps {
     currentConversationId?: string | null;
     expanded: boolean;
     onToggleExpand: () => void;
+    showFavoritesOnly: boolean;
+    setShowFavoritesOnly: (val: boolean) => void;
+    onToggleFavorite?: (id: string, currentlyFavorite: boolean) => void;
+    userEmail?: string | null;
+    onOpenAuth?: () => void;
+    onLogout?: () => void;
 }
 
 const COLLAPSED_W = 60;
@@ -39,6 +47,12 @@ const Sidebar = ({
     currentConversationId,
     expanded,
     onToggleExpand,
+    showFavoritesOnly,
+    setShowFavoritesOnly,
+    onToggleFavorite,
+    userEmail,
+    onOpenAuth,
+    onLogout,
 }: SidebarProps) => {
     const [historyOpen, setHistoryOpen] = useState(false);
 
@@ -90,17 +104,49 @@ const Sidebar = ({
                         <SidebarBtn icon={<PanelLeftOpen size={18} />} label="Expand" expanded={false} onClick={onToggleExpand} />
                     )}
                     <SidebarBtn icon={theme === 'dark' ? <Sun size={16} /> : <Moon size={16} />} label={theme === 'dark' ? 'Light' : 'Dark'} expanded={expanded} onClick={toggleTheme} />
-                    <SidebarBtn icon={<Star size={16} />} label="Favorites" expanded={expanded} />
+                    <SidebarBtn icon={<Star size={16} />} label="Favorites" expanded={expanded} onClick={() => setShowFavoritesOnly(!showFavoritesOnly)} active={showFavoritesOnly} />
                 </div>
 
-                {/* Avatar */}
-                <div style={{ padding: expanded ? '12px 14px 0 14px' : '12px 0 0 0', display: 'flex', justifyContent: expanded ? 'flex-start' : 'center' }}>
+                {/* Avatar / Auth */}
+                <div style={{ padding: expanded ? '12px 14px 12px 14px' : '12px 0 12px 0', borderTop: '1px solid var(--color-edge)', display: 'flex', alignItems: 'center', justifyContent: expanded ? 'space-between' : 'center', marginTop: 'auto' }}>
                     <div
-                        className="overflow-hidden cursor-pointer flex items-center justify-center text-white text-xs font-semibold"
-                        style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(224,90,43,0.6), rgba(224,90,43,0.3))' }}
+                        onClick={userEmail ? undefined : onOpenAuth}
+                        className={`flex items-center gap-3 ${!userEmail ? 'cursor-pointer hover:opacity-80' : ''} transition-opacity w-full`}
+                        title={userEmail ? userEmail : "Login / Register"}
+                        style={{ justifyContent: expanded ? 'flex-start' : 'center' }}
                     >
-                        U
+                        <div
+                            className="shrink-0 overflow-hidden flex items-center justify-center text-white text-xs font-semibold"
+                            style={{ width: '32px', height: '32px', borderRadius: '50%', background: 'linear-gradient(135deg, rgba(224,90,43,0.6), rgba(224,90,43,0.3))' }}
+                        >
+                            {userEmail ? (
+                                userEmail.charAt(0).toUpperCase()
+                            ) : (
+                                <User size={16} />
+                            )}
+                        </div>
+
+                        {expanded && (
+                            <div className="flex flex-col overflow-hidden">
+                                <span className={userEmail ? "text-sm font-semibold truncate" : "text-sm font-semibold truncate hover:underline cursor-pointer"} style={{ color: 'var(--color-primary)' }}>
+                                    {userEmail ? userEmail.split('@')[0] : 'Sign In / Register'}
+                                </span>
+                                <span className="text-[10px] truncate" style={{ color: 'var(--color-muted)' }}>
+                                    {userEmail ? 'Logged in' : 'to save your chats'}
+                                </span>
+                            </div>
+                        )}
                     </div>
+
+                    {expanded && userEmail && (
+                        <button
+                            onClick={onLogout}
+                            className="p-1.5 rounded-lg text-[var(--color-muted)] hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
+                            title="Log Out"
+                        >
+                            <LogOut size={16} />
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -154,21 +200,29 @@ const Sidebar = ({
                                 </div>
                             ) : (
                                 <div className="space-y-1">
-                                    {conversations.map((conv) => (
-                                        <button
-                                            key={conv.id}
-                                            onClick={() => { onSelectConversation?.(conv.id); setHistoryOpen(false); }}
-                                            className="w-full flex items-center gap-3 rounded-lg text-left text-sm transition-all active:scale-[0.98]"
-                                            style={{
-                                                padding: '10px 12px',
-                                                minHeight: '44px',
-                                                color: conv.id === currentConversationId ? 'var(--color-accent)' : 'var(--color-secondary)',
-                                                backgroundColor: conv.id === currentConversationId ? 'rgba(224,90,43,0.12)' : 'transparent',
-                                            }}
-                                        >
-                                            <FileText size={14} className="shrink-0" style={{ opacity: 0.6 }} />
-                                            <span className="truncate">{conv.title}</span>
-                                        </button>
+                                    {conversations.filter(c => !showFavoritesOnly || (c as any).is_favorite).map((conv) => (
+                                        <div key={conv.id} className="flex items-center gap-1 group">
+                                            <button
+                                                onClick={() => { onSelectConversation?.(conv.id); setHistoryOpen(false); }}
+                                                className="flex-1 flex items-center gap-3 rounded-lg text-left text-sm transition-all active:scale-[0.98]"
+                                                style={{
+                                                    padding: '10px 12px',
+                                                    minHeight: '44px',
+                                                    color: conv.id === currentConversationId ? 'var(--color-accent)' : 'var(--color-secondary)',
+                                                    backgroundColor: conv.id === currentConversationId ? 'rgba(224,90,43,0.12)' : 'transparent',
+                                                }}
+                                            >
+                                                <FileText size={14} className="shrink-0" style={{ opacity: 0.6 }} />
+                                                <span className="truncate">{conv.title}</span>
+                                            </button>
+                                            <button
+                                                onClick={(e) => { e.stopPropagation(); onToggleFavorite?.(conv.id, (conv as any).is_favorite || false); }}
+                                                className="p-2 shrink-0 transition-colors opacity-0 group-hover:opacity-100 hover:bg-black/5 dark:hover:bg-white/5 rounded-full outline-none"
+                                                style={{ color: (conv as any).is_favorite ? '#EAB308' : 'var(--color-muted)', opacity: (conv as any).is_favorite ? 1 : undefined }}
+                                            >
+                                                <Star size={14} fill={(conv as any).is_favorite ? 'currentColor' : 'none'} />
+                                            </button>
+                                        </div>
                                     ))}
                                 </div>
                             )}

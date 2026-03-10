@@ -10,7 +10,9 @@ import uuid
 import traceback
 
 from src.database import get_db
-from src.models import Document as DBDocument, Conversation, Message, Session as SessionModel
+from src.models import Document as DBDocument, Conversation, Message, Session as SessionModel, User
+from src.auth import get_password_hash, verify_password, create_access_token, get_current_user_id
+from sqlalchemy.exc import IntegrityError
 from src.document_processor import DocumentProcessor
 from src.session_manager import SessionManager, ConversationManager
 
@@ -18,6 +20,14 @@ router = APIRouter()
 
 
 # ─── Pydantic Models ───────────────────────────────
+
+class UserCreate(BaseModel):
+    email: str
+    password: str
+
+class AuthResponse(BaseModel):
+    token: str
+    user: Dict
 
 class UploadResponse(BaseModel):
     document_id: str
@@ -41,6 +51,36 @@ class DeleteResponse(BaseModel):
     success: bool
     message: str
 
+# ─── Auth Endpoints ────────────────────────────────
+
+@router.post("/auth/register")
+async def register(user_data: UserCreate, db: DBSession = Depends(get_db)):
+    try:
+        new_user = User(
+            email=user_data.email,
+            password_hash=get_password_hash(user_data.password)
+        )
+        db.add(new_user)
+        db.commit()
+        db.refresh(new_user)
+        
+        token = create_access_token({"sub": new_user.id})
+        return {"token": token, "user": {"id": new_user.id, "email": new_user.email}}
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(status_code=400, detail="Email already registered")
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))
+
+@router.post("/auth/login")
+async def login(user_data: UserCreate, db: DBSession = Depends(get_db)):
+    user = db.query(User).filter(User.email == user_data.email).first()
+    if not user or not verify_password(user_data.password, user.password_hash):
+        raise HTTPException(status_code=401, detail="Invalid credentials")
+    
+    token = create_access_token({"sub": user.id})
+    return {"token": token, "user": {"id": user.id, "email": user.email}}
 
 # ─── Upload Endpoint ───────────────────────────────
 
@@ -359,10 +399,11 @@ async def cleanup_old_data(
 @router.get("/sessions/{session_id}/conversations")
 async def get_session_conversations(
     session_id: str,
-    db: DBSession = Depends(get_db)
+    db: DBSession = Depends(get_db),
+    user_id: str | None = Depends(get_current_user_id)
 ):
-    """Get all conversations for a session"""
-    return SessionManager.get_session_conversations(session_id, db)
+    """Get all conversations for a session or user"""
+    return SessionManager.get_session_conversations(session_id, db, user_id)
 
 
 @router.get("/conversations/{conversation_id}/messages")
@@ -400,10 +441,11 @@ async def get_documents(
 @router.post("/conversations")
 async def create_conversation(
     session_id: str = Query(...),
-    db: DBSession = Depends(get_db)
+    db: DBSession = Depends(get_db),
+    user_id: str | None = Depends(get_current_user_id)
 ):
     """Create new conversation"""
-    SessionManager.get_or_create_session(session_id, db)
+    SessionManager.get_or_create_session(session_id, db, user_id)
 
     conv_id = str(uuid.uuid4())
     conversation = Conversation(
@@ -419,5 +461,23 @@ async def create_conversation(
     return {
         "id": conv_id,
         "title": conversation.title,
+        "is_favorite": conversation.is_favorite,
         "created_at": conversation.created_at.isoformat()
     }
+
+@router.patch("/conversations/{conversation_id}/favorite")
+async def toggle_favorite(
+    conversation_id: str,
+    db: DBSession = Depends(get_db)
+):
+    try:
+        convo = db.query(Conversation).filter(Conversation.id == conversation_id).first()
+        if not convo:
+            raise HTTPException(status_code=404, detail="Conversation not found")
+            
+        convo.is_favorite = not convo.is_favorite
+        db.commit()
+        return {"is_favorite": convo.is_favorite}
+    except Exception as e:
+        db.rollback()
+        raise HTTPException(status_code=500, detail=str(e))

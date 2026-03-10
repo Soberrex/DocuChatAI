@@ -36,3 +36,8 @@ requests
 # LLM
 openai
 tiktoken
+
+# Authentication
+passlib[bcrypt]
+pyjwt
+email-validator

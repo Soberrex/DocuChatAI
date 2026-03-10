@@ -11,6 +11,27 @@ const api = axios.create({
   },
 });
 
+// Append Auth token and handle 401s globally
+api.interceptors.request.use((config) => {
+  const token = localStorage.getItem('auth_token');
+  if (token) {
+    config.headers.Authorization = `Bearer ${token}`;
+  }
+  return config;
+});
+
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem('auth_token');
+      // Optional: dispatch event so UI knows to show login modal
+      window.dispatchEvent(new Event('auth:unauthorized'));
+    }
+    return Promise.reject(error);
+  }
+);
+
 export interface Source {
   document_id: string;
   filename: string;
@@ -44,8 +65,17 @@ export interface Document {
 export interface Conversation {
   id: string;
   title: string;
+  is_favorite?: boolean;
   created_at: string;
   updated_at: string;
+}
+
+export interface AuthResponse {
+  token: string;
+  user: {
+    id: string;
+    email: string;
+  };
 }
 
 export interface ChatResponse {
@@ -102,7 +132,7 @@ export const createConversation = async (sessionId: string): Promise<Conversatio
   return response.data;
 };
 
-// Get user conversations
+// Get all conversations
 export const getConversations = async (sessionId: string): Promise<Conversation[]> => {
   const response = await api.get(`/sessions/${sessionId}/conversations`);
   return response.data;
@@ -116,6 +146,29 @@ export const deleteConversation = async (conversationId: string): Promise<void> 
 // Delete document
 export const deleteDocument = async (documentId: string): Promise<void> => {
   await api.delete(`/documents/${documentId}`);
+};
+
+// ── Auth & User Endpoints ──
+
+export const login = async (email: string, password: string): Promise<AuthResponse> => {
+  const response = await api.post('/auth/login', { email, password });
+  if (response.data.token) {
+    localStorage.setItem('auth_token', response.data.token);
+  }
+  return response.data;
+};
+
+export const register = async (email: string, password: string): Promise<AuthResponse> => {
+  const response = await api.post('/auth/register', { email, password });
+  if (response.data.token) {
+    localStorage.setItem('auth_token', response.data.token);
+  }
+  return response.data;
+};
+
+export const toggleFavorite = async (conversationId: string): Promise<{ is_favorite: boolean }> => {
+  const response = await api.patch(`/conversations/${conversationId}/favorite`);
+  return response.data;
 };
 
 // Delete session (all data)

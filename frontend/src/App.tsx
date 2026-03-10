@@ -5,6 +5,7 @@ import Sidebar from './components/Sidebar';
 import WelcomeView from './components/WelcomeView';
 import ChatInterface from './components/ChatInterface';
 import KnowledgeBase from './components/KnowledgeBase';
+import AuthModal from './components/AuthModal';
 import { useResponsive } from './hooks/useResponsive';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -16,6 +17,7 @@ import {
   deleteConversation as apiDeleteConversation,
   deleteDocument as apiDeleteDocument,
   getConversationHistory,
+  toggleFavorite as apiToggleFavorite,
 } from './services/api';
 
 /* ── Session Management ────────────────────────────── */
@@ -98,6 +100,40 @@ function App() {
   const [sessionId] = useState(getSessionId);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
+  // Auth and Favorites State
+  const [showAuthModal, setShowAuthModal] = useState(false);
+  const [user, setUser] = useState<{ id: string; email: string } | null>(null);
+  const [showFavoritesOnly, setShowFavoritesOnly] = useState(false);
+
+  // Initialize Auth from storage and Listen for 401 Events
+  useEffect(() => {
+    const email = localStorage.getItem('user_email');
+    if (email) setUser({ id: '', email });
+
+    const handleUnauthorized = () => {
+      setUser(null);
+      localStorage.removeItem('user_email');
+      setShowAuthModal(true);
+    };
+    window.addEventListener('auth:unauthorized', handleUnauthorized);
+    return () => window.removeEventListener('auth:unauthorized', handleUnauthorized);
+  }, []);
+
+  // Auto-delete Guest Session on Exit
+  useEffect(() => {
+    const handleBeforeUnload = () => {
+      // If no user is logged in, their session is strictly temporary.
+      // We use sendBeacon because standard fetch/axios requests are cancelled on tab close.
+      if (!localStorage.getItem('user_email')) {
+        const url = `${import.meta.env.VITE_API_URL || ''}/api/sessions/${sessionId}`;
+        navigator.sendBeacon(url);
+      }
+    };
+
+    window.addEventListener('beforeunload', handleBeforeUnload);
+    return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+  }, [sessionId, user]);
+
   // Resizable panels
   const kbPanel = usePanelResize(380, 280, 550, 'kb_w', 'right');
 
@@ -127,7 +163,7 @@ function App() {
   const loadConversations = async () => {
     try {
       const convs = await getConversations(sessionId);
-      setConversations(convs.map((c: any) => ({ id: c.id, title: c.title })));
+      setConversations(convs.map((c: any) => ({ id: c.id, title: c.title, is_favorite: c.is_favorite })));
     } catch (e) {
       console.warn('Could not load conversations (backend may be offline):', e);
       // Keep empty — this is fine for first use
@@ -140,6 +176,19 @@ function App() {
       setDocuments(docs);
     } catch (e) {
       console.warn('Could not load documents (backend may be offline):', e);
+    }
+  };
+
+  const handleToggleFavorite = async (id: string, currentlyFavorite: boolean) => {
+    // Optimistic UI update
+    setConversations(prev => prev.map(c => c.id === id ? { ...c, is_favorite: !currentlyFavorite } : c));
+    try {
+      const { is_favorite } = await apiToggleFavorite(id);
+      setConversations(prev => prev.map(c => c.id === id ? { ...c, is_favorite } : c));
+    } catch (error) {
+      console.error('Failed to toggle favorite', error);
+      // Revert optimistic update
+      setConversations(prev => prev.map(c => c.id === id ? { ...c, is_favorite: currentlyFavorite } : c));
     }
   };
 
@@ -308,11 +357,20 @@ function App() {
     }
   };
 
+  const handleLogout = () => {
+    localStorage.removeItem('user_email');
+    localStorage.removeItem('token');
+    setUser(null);
+    setConversations([]);
+    setDocuments([]);
+    handleNewChat();
+  };
+
   const renderChatPanel = () => {
     if (showWelcome) {
       return (
         <div className="flex flex-col h-full">
-          <WelcomeView onSendMessage={handleSendMessage} />
+          <WelcomeView onSendMessage={handleSendMessage} userEmail={user?.email} />
           <div className="shrink-0 w-full flex justify-center" style={{ padding: '8px 24px 24px 24px' }}>
             <div className="w-full" style={{ maxWidth: '520px' }}>
               <ChatInput onSend={handleSendMessage} isProcessing={isProcessing} onFileUpload={showFilesPanel} />
@@ -351,6 +409,16 @@ function App() {
           <NavBtn icon={<FolderOpen size={18} />} label="Files" onClick={() => setMobilePanel('files')} active={mobilePanel === 'files'} />
           <NavBtn icon={theme === 'dark' ? <Sun size={18} /> : <Moon size={18} />} label={theme === 'dark' ? 'Light' : 'Dark'} onClick={toggleTheme} active={false} />
         </div>
+
+        {/* Auth Modal */}
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={(newUser) => {
+            setUser(newUser);
+            localStorage.setItem('user_email', newUser.email);
+          }}
+        />
       </div>
     );
   }
@@ -359,7 +427,24 @@ function App() {
   if (isTablet) {
     return (
       <div className="h-screen w-screen flex overflow-hidden" style={{ backgroundColor: 'var(--color-surface)' }}>
-        <Sidebar activeTab={showWelcome ? 'home' : 'chat'} setActiveTab={() => { }} theme={theme} toggleTheme={toggleTheme} conversations={conversations} onNewChat={handleNewChat} onSelectConversation={handleSelectConversation} currentConversationId={conversationId} expanded={sidebarExpanded} onToggleExpand={toggleSidebar} />
+        <Sidebar
+          activeTab={showWelcome ? 'home' : 'chat'}
+          setActiveTab={() => { }}
+          theme={theme}
+          toggleTheme={toggleTheme}
+          conversations={conversations}
+          onNewChat={handleNewChat}
+          onSelectConversation={handleSelectConversation}
+          currentConversationId={conversationId}
+          expanded={sidebarExpanded}
+          onToggleExpand={toggleSidebar}
+          showFavoritesOnly={showFavoritesOnly}
+          setShowFavoritesOnly={setShowFavoritesOnly}
+          onToggleFavorite={handleToggleFavorite}
+          userEmail={user?.email}
+          onOpenAuth={() => setShowAuthModal(true)}
+          onLogout={handleLogout}
+        />
         <div className="flex-1 flex flex-col min-w-0 overflow-hidden">
           {errorBanner}
           {renderChatPanel()}
@@ -376,6 +461,16 @@ function App() {
             </div>
           </>
         )}
+
+        {/* Auth Modal */}
+        <AuthModal
+          isOpen={showAuthModal}
+          onClose={() => setShowAuthModal(false)}
+          onSuccess={(newUser) => {
+            setUser(newUser);
+            localStorage.setItem('user_email', newUser.email);
+          }}
+        />
       </div>
     );
   }
@@ -398,6 +493,12 @@ function App() {
           currentConversationId={conversationId}
           expanded={sidebarExpanded}
           onToggleExpand={toggleSidebar}
+          showFavoritesOnly={showFavoritesOnly}
+          setShowFavoritesOnly={setShowFavoritesOnly}
+          onToggleFavorite={handleToggleFavorite}
+          userEmail={user?.email}
+          onOpenAuth={() => setShowAuthModal(true)}
+          onLogout={handleLogout}
         />
 
       </div>
@@ -413,6 +514,16 @@ function App() {
         <DragHandle side="left" onMouseDown={kbPanel.onMouseDown} />
         <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={handleDeleteDocument} />
       </div>
+
+      {/* Auth Modal */}
+      <AuthModal
+        isOpen={showAuthModal}
+        onClose={() => setShowAuthModal(false)}
+        onSuccess={(newUser) => {
+          setUser(newUser);
+          localStorage.setItem('user_email', newUser.email);
+        }}
+      />
     </div>
   );
 }

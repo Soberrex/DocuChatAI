@@ -14,13 +14,14 @@ class SessionManager:
     """Manage user sessions and conversation history"""
     
     @staticmethod
-    def get_or_create_session(session_id: str, db: Session) -> DBSession:
+    def get_or_create_session(session_id: str, db: Session, user_id: str | None = None) -> DBSession:
         """Get existing session or create new one"""
         session = db.query(DBSession).filter(DBSession.id == session_id).first()
         
         if not session:
             session = DBSession(
                 id=session_id,
+                user_id=user_id,
                 created_at=datetime.utcnow(),
                 last_active=datetime.utcnow()
             )
@@ -28,23 +29,34 @@ class SessionManager:
             db.commit()
             db.refresh(session)
         else:
-            # Update last active
+            # Update last active and link user if logging in
             session.last_active = datetime.utcnow()
+            if user_id and not session.user_id:
+                session.user_id = user_id
             db.commit()
         
         return session
     
     @staticmethod
-    def get_session_conversations(session_id: str, db: Session) -> List[Dict]:
-        """Get all conversations for a session"""
-        conversations = db.query(Conversation).filter(
-            Conversation.session_id == session_id
-        ).order_by(desc(Conversation.updated_at)).all()
+    def get_session_conversations(session_id: str, db: Session, user_id: str | None = None) -> List[Dict]:
+        """Get all conversations for a session or user"""
+        if user_id:
+            # If logged in, get ALL conversations for this user across all their sessions
+            user_sessions = db.query(DBSession.id).filter(DBSession.user_id == user_id).subquery()
+            conversations = db.query(Conversation).filter(
+                Conversation.session_id.in_(user_sessions)
+            ).order_by(desc(Conversation.updated_at)).all()
+        else:
+            # Guest mode: strictly limit to this browser session
+            conversations = db.query(Conversation).filter(
+                Conversation.session_id == session_id
+            ).order_by(desc(Conversation.updated_at)).all()
         
         return [
             {
                 "id": conv.id,
                 "title": conv.title,
+                "is_favorite": conv.is_favorite,
                 "created_at": conv.created_at.isoformat(),
                 "updated_at": conv.updated_at.isoformat(),
                 "message_count": len(conv.messages)
