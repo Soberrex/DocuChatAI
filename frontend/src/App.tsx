@@ -14,6 +14,7 @@ import {
   getConversations,
   createConversation,
   deleteConversation as apiDeleteConversation,
+  deleteDocument as apiDeleteDocument,
   getConversationHistory,
 } from './services/api';
 
@@ -248,24 +249,33 @@ function App() {
 
     const interval = setInterval(async () => {
       attempts++;
-      if (attempts >= maxAttempts) {
-        clearInterval(interval);
-        return;
-      }
-
       try {
-        const docs = await getDocuments(sessionId);
-        const doc = docs.find((d: any) => d.id === docId);
-        if (doc && doc.status !== 'processing') {
-          setDocuments((prev) =>
-            prev.map((d) => d.id === docId ? { ...d, status: doc.status, metadata: doc.metadata } : d)
-          );
+        const currentDocs = await getDocuments(sessionId);
+        const match = currentDocs.find((d: any) => d.id === docId);
+        if (match && match.status !== 'processing') {
+          setDocuments(currentDocs);
+          clearInterval(interval);
+        } else if (attempts >= maxAttempts) {
           clearInterval(interval);
         }
-      } catch {
-        // Silently retry
+      } catch (e) {
+        clearInterval(interval);
       }
     }, 2000);
+  };
+
+  // ── Delete Document Handler ──
+  const handleDeleteDocument = async (id: string) => {
+    try {
+      // Optimistically remove from UI
+      setDocuments((p) => p.filter((d) => d.id !== id));
+      // Tell backend to delete from DB and Disk
+      await apiDeleteDocument(id);
+    } catch (e) {
+      console.error('Failed to delete document:', e);
+      // Optional: Refresh document list if delete failed to revert optimistic update
+      // getDocuments(sessionId).then(setDocuments);
+    }
   };
 
   // ── Delete conversation ──
@@ -362,7 +372,7 @@ function App() {
                 <span className="text-sm font-semibold" style={{ color: 'var(--color-primary)' }}>Knowledge Base</span>
                 <button onClick={() => setTabletFilesOpen(false)} className="p-1.5 rounded-lg" style={{ color: 'var(--color-muted)' }}>✕</button>
               </div>
-              <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={(id) => setDocuments((p) => p.filter((d) => d.id !== id))} />
+              <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={handleDeleteDocument} />
             </div>
           </>
         )}
@@ -401,7 +411,7 @@ function App() {
       {/* Knowledge Base — resizable */}
       <div className="shrink-0 h-full relative" style={{ width: `${kbPanel.width}px`, borderLeft: '1px solid var(--color-edge)' }}>
         <DragHandle side="left" onMouseDown={kbPanel.onMouseDown} />
-        <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={(id) => setDocuments((p) => p.filter((d) => d.id !== id))} />
+        <KnowledgeBase documents={documents} onFileUpload={handleFileUpload} uploading={uploading} onDocumentDeleted={handleDeleteDocument} />
       </div>
     </div>
   );
